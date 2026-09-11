@@ -14,8 +14,32 @@ const supabaseAdmin = createClient(
   }
 );
 
+function detectDevice(userAgent: string) {
+  if (/mobile/i.test(userAgent)) return "Mobile";
+  if (/tablet|ipad/i.test(userAgent)) return "Tablet";
+  return "Desktop";
+}
+
+function detectOS(userAgent: string) {
+  if (/android/i.test(userAgent)) return "Android";
+  if (/iphone|ipad|ios/i.test(userAgent)) return "iOS";
+  if (/windows/i.test(userAgent)) return "Windows";
+  if (/mac os|macintosh/i.test(userAgent)) return "macOS";
+  if (/linux/i.test(userAgent)) return "Linux";
+  return "Unknown";
+}
+
+function detectBrowser(userAgent: string) {
+  if (/edg/i.test(userAgent)) return "Edge";
+  if (/opr|opera/i.test(userAgent)) return "Opera";
+  if (/chrome/i.test(userAgent)) return "Chrome";
+  if (/safari/i.test(userAgent)) return "Safari";
+  if (/firefox/i.test(userAgent)) return "Firefox";
+  return "Unknown";
+}
+
 export async function GET(
-  _request: Request,
+  request: Request,
   context: { params: Promise<{ slug: string }> }
 ) {
   const { slug } = await context.params;
@@ -40,6 +64,36 @@ export async function GET(
     });
   }
 
+  const userAgent = request.headers.get("user-agent") ?? "";
+
+  const country =
+    request.headers.get("x-vercel-ip-country") ?? "Unknown";
+
+  const city =
+    request.headers.get("x-vercel-ip-city") ?? "Unknown";
+
+  const device = detectDevice(userAgent);
+  const os = detectOS(userAgent);
+  const browser = detectBrowser(userAgent);
+
+  const { error: eventError } = await supabaseAdmin
+    .from("click_events")
+    .insert({
+      slug,
+      country,
+      city,
+      device,
+      os,
+      browser,
+    });
+
+  if (eventError) {
+    console.error(
+      "Error guardando evento de clic:",
+      eventError
+    );
+  }
+
   const newClicks = (data.clicks ?? 0) + 1;
 
   const { error: updateError } = await supabaseAdmin
@@ -50,7 +104,10 @@ export async function GET(
     .eq("slug", slug);
 
   if (updateError) {
-    console.error("Error actualizando clicks:", updateError);
+    console.error(
+      "Error actualizando clicks:",
+      updateError
+    );
   }
 
   return new Response(null, {
