@@ -154,6 +154,7 @@ export async function GET(
         device,
         os,
         browser,
+        is_human: true,
       });
 
     if (eventError) {
