@@ -23,6 +23,13 @@ export default function Home() {
   const [totalClicks, setTotalClicks] = useState(0);
   const [clicksToday, setClicksToday] = useState(0);
 
+  const [topCountry, setTopCountry] = useState("Sin datos");
+  const [topCountryCount, setTopCountryCount] = useState(0);
+  const [topCity, setTopCity] = useState("Sin datos");
+  const [topCityCount, setTopCityCount] = useState(0);
+  const [topDevice, setTopDevice] = useState("Sin datos");
+  const [topDeviceCount, setTopDeviceCount] = useState(0);
+
   useEffect(() => {
     async function loadAnalytics() {
       try {
@@ -37,6 +44,13 @@ export default function Home() {
         setTotalLinks(data.totalLinks ?? 0);
         setTotalClicks(data.totalClicks ?? 0);
         setClicksToday(data.clicksToday ?? 0);
+
+        setTopCountry(data.topCountry?.value ?? "Sin datos");
+        setTopCountryCount(data.topCountry?.count ?? 0);
+        setTopCity(data.topCity?.value ?? "Sin datos");
+        setTopCityCount(data.topCity?.count ?? 0);
+        setTopDevice(data.topDevice?.value ?? "Sin datos");
+        setTopDeviceCount(data.topDevice?.count ?? 0);
       } catch (error) {
         console.error("Error cargando analítica:", error);
       }
@@ -731,6 +745,44 @@ async function generateWhatsApp() {
                 </p>
                 <p className="mt-2 text-4xl font-black text-cyan-400">
                   {clicksToday}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-4 sm:grid-cols-3">
+              <div className="rounded-2xl border border-slate-800 bg-slate-950 p-6">
+                <p className="text-sm font-semibold text-slate-400">
+                  País principal
+                </p>
+                <p className="mt-2 text-2xl font-black text-cyan-400">
+                  {topCountry}
+                </p>
+                <p className="mt-2 text-sm text-slate-500">
+                  {topCountryCount} clics
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-slate-800 bg-slate-950 p-6">
+                <p className="text-sm font-semibold text-slate-400">
+                  Ciudad principal
+                </p>
+                <p className="mt-2 text-2xl font-black text-cyan-400">
+                  {topCity}
+                </p>
+                <p className="mt-2 text-sm text-slate-500">
+                  {topCityCount} clics
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-slate-800 bg-slate-950 p-6">
+                <p className="text-sm font-semibold text-slate-400">
+                  Dispositivo principal
+                </p>
+                <p className="mt-2 text-2xl font-black text-cyan-400">
+                  {topDevice}
+                </p>
+                <p className="mt-2 text-sm text-slate-500">
+                  {topDeviceCount} clics
                 </p>
               </div>
             </div>

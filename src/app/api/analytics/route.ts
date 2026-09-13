@@ -14,6 +14,35 @@ const supabaseAdmin = createClient(
   }
 );
 
+function getMostFrequent(values: (string | null)[]) {
+  const counts: Record<string, number> = {};
+
+  for (const value of values) {
+    if (!value) continue;
+
+    const cleanValue = decodeURIComponent(value).trim();
+
+    if (!cleanValue) continue;
+
+    counts[cleanValue] = (counts[cleanValue] ?? 0) + 1;
+  }
+
+  let topValue = "";
+  let topCount = 0;
+
+  for (const [value, count] of Object.entries(counts)) {
+    if (count > topCount) {
+      topValue = value;
+      topCount = count;
+    }
+  }
+
+  return {
+    value: topValue || "Sin datos",
+    count: topCount,
+  };
+}
+
 export async function GET() {
   try {
     const { count: totalLinks, error: linksError } = await supabaseAdmin
@@ -80,10 +109,45 @@ export async function GET() {
       );
     }
 
+    const { data: clickEvents, error: eventsError } = await supabaseAdmin
+      .from("click_events")
+      .select("country, city, device");
+
+    if (eventsError) {
+      console.error("Error obteniendo eventos:", eventsError);
+
+      return Response.json(
+        {
+          error: "No se pudieron obtener los datos de analítica.",
+        },
+        {
+          status: 500,
+        }
+      );
+    }
+
+    const events = clickEvents ?? [];
+
+    const topCountry = getMostFrequent(
+      events.map((event) => event.country)
+    );
+
+    const topCity = getMostFrequent(
+      events.map((event) => event.city)
+    );
+
+    const topDevice = getMostFrequent(
+      events.map((event) => event.device)
+    );
+
     return Response.json({
       totalLinks: totalLinks ?? 0,
       totalClicks: totalClicks ?? 0,
       clicksToday: clicksToday ?? 0,
+
+      topCountry,
+      topCity,
+      topDevice,
     });
   } catch (error) {
     console.error("Error en API de analítica:", error);
