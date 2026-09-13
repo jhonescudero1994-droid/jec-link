@@ -1,10 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import QRCode from "qrcode";
 import { supabase } from "@/lib/supabase";
-
 type Mode = "whatsapp" | "web" | "phone" | "sms" | "email" | "text";
 
 const tools: { id: Mode; label: string }[] = [
@@ -18,7 +17,33 @@ const tools: { id: Mode; label: string }[] = [
 
 export default function Home() {
   const [mode, setMode] = useState<Mode>("whatsapp");
+  const [showAnalytics, setShowAnalytics] = useState(false);
 
+  const [totalLinks, setTotalLinks] = useState(0);
+  const [totalClicks, setTotalClicks] = useState(0);
+  const [clicksToday, setClicksToday] = useState(0);
+
+  useEffect(() => {
+    async function loadAnalytics() {
+      try {
+        const response = await fetch("/api/analytics");
+
+        if (!response.ok) {
+          throw new Error("No se pudo cargar la analítica.");
+        }
+
+        const data = await response.json();
+
+        setTotalLinks(data.totalLinks ?? 0);
+        setTotalClicks(data.totalClicks ?? 0);
+        setClicksToday(data.clicksToday ?? 0);
+      } catch (error) {
+        console.error("Error cargando analítica:", error);
+      }
+    }
+
+    loadAnalytics();
+  }, []);
   const [phone, setPhone] = useState("");
   const [message, setMessage] = useState("");
 
@@ -272,11 +297,11 @@ async function generateWhatsApp() {
     setCopied(false);
   }
 
-  function changeMode(newMode: Mode) {
-    setMode(newMode);
-    clearResult();
-  }
-
+ function changeMode(newMode: Mode) {
+  setShowAnalytics(false);
+  setMode(newMode);
+  clearResult();
+}
   function clearAll() {
     setPhone("");
     setMessage("");
@@ -376,10 +401,24 @@ async function generateWhatsApp() {
                 {tool.label}
               </button>
             ))}
+            <button
+  onClick={() => setShowAnalytics(true)}
+  className={`rounded-xl px-3 py-3 text-sm font-bold transition ${
+    showAnalytics
+      ? "bg-cyan-400 text-slate-950"
+      : "text-slate-400 hover:bg-slate-800"
+  }`}
+>
+  📊 Analítica
+</button>
           </div>
         </section>
 
-        <section className="grid gap-6 lg:grid-cols-2">
+        <section
+  className={`grid gap-6 lg:grid-cols-2 ${
+    showAnalytics ? "hidden" : ""
+  }`}
+>
           <div className="rounded-3xl border border-slate-800 bg-slate-900 p-6 shadow-2xl">
             {mode === "whatsapp" && (
               <>
@@ -650,6 +689,53 @@ async function generateWhatsApp() {
             )}
           </div>
         </section>
+
+        {showAnalytics && (
+          <section className="mt-8 rounded-2xl border border-cyan-500/30 bg-slate-900 p-6">
+            <div className="text-center">
+              <p className="text-xs font-bold uppercase tracking-[0.25em] text-cyan-400">
+                Analítica JEc LINK
+              </p>
+
+              <h2 className="mt-2 text-2xl font-bold text-white">
+                Panel de estadísticas
+              </h2>
+
+              <p className="mt-3 text-sm text-slate-400">
+                Resumen general de tus enlaces y clics registrados.
+              </p>
+            </div>
+
+            <div className="mt-6 grid gap-4 sm:grid-cols-3">
+              <div className="rounded-2xl border border-slate-800 bg-slate-950 p-6">
+                <p className="text-sm font-semibold text-slate-400">
+                  Enlaces creados
+                </p>
+                <p className="mt-2 text-4xl font-black text-cyan-400">
+                  {totalLinks}
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-slate-800 bg-slate-950 p-6">
+                <p className="text-sm font-semibold text-slate-400">
+                  Clics registrados
+                </p>
+                <p className="mt-2 text-4xl font-black text-cyan-400">
+                  {totalClicks}
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-slate-800 bg-slate-950 p-6">
+                <p className="text-sm font-semibold text-slate-400">
+                  Clics de hoy
+                </p>
+                <p className="mt-2 text-4xl font-black text-cyan-400">
+                  {clicksToday}
+                </p>
+              </div>
+            </div>
+          </section>
+        )}
 
         <section className="mt-8 rounded-2xl border border-slate-800 bg-slate-900/50 p-5 text-center">
           <p className="text-xs font-bold uppercase tracking-[0.25em] text-slate-500">
