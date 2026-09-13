@@ -32,10 +32,72 @@ function detectOS(userAgent: string) {
 function detectBrowser(userAgent: string) {
   if (/edg/i.test(userAgent)) return "Edge";
   if (/opr|opera/i.test(userAgent)) return "Opera";
-  if (/chrome/i.test(userAgent)) return "Chrome";
+  if (/chrome|crios/i.test(userAgent)) return "Chrome";
   if (/safari/i.test(userAgent)) return "Safari";
-  if (/firefox/i.test(userAgent)) return "Firefox";
+  if (/firefox|fxios/i.test(userAgent)) return "Firefox";
   return "Unknown";
+}
+
+function isLikelyBot(request: Request, userAgent: string) {
+  const ua = userAgent.toLowerCase();
+
+  const botPatterns = [
+    "bot",
+    "crawler",
+    "spider",
+    "slurp",
+    "preview",
+    "facebookexternalhit",
+    "facebot",
+    "twitterbot",
+    "linkedinbot",
+    "slackbot",
+    "discordbot",
+    "telegrambot",
+    "googlebot",
+    "bingbot",
+    "yandexbot",
+    "baiduspider",
+    "duckduckbot",
+    "petalbot",
+    "whatsapp",
+    "curl/",
+    "wget/",
+    "python-requests",
+    "axios/",
+    "node-fetch",
+    "headlesschrome",
+    "lighthouse",
+  ];
+
+  if (!ua) {
+    return true;
+  }
+
+  if (botPatterns.some((pattern) => ua.includes(pattern))) {
+    return true;
+  }
+
+  const purpose =
+    request.headers.get("purpose")?.toLowerCase() ?? "";
+
+  const secPurpose =
+    request.headers.get("sec-purpose")?.toLowerCase() ?? "";
+
+  const xMoz =
+    request.headers.get("x-moz")?.toLowerCase() ?? "";
+
+  if (
+    purpose.includes("prefetch") ||
+    purpose.includes("preview") ||
+    secPurpose.includes("prefetch") ||
+    secPurpose.includes("preview") ||
+    xMoz.includes("prefetch")
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 export async function GET(
@@ -64,49 +126,62 @@ export async function GET(
     });
   }
 
-  const userAgent = request.headers.get("user-agent") ?? "";
+  const userAgent =
+    request.headers.get("user-agent") ?? "";
 
-  const country =
-    request.headers.get("x-vercel-ip-country") ?? "Unknown";
+  const botDetected =
+    isLikelyBot(request, userAgent);
 
-  const city =
-    request.headers.get("x-vercel-ip-city") ?? "Unknown";
+  if (!botDetected) {
+    const country =
+      request.headers.get("x-vercel-ip-country") ??
+      "Unknown";
 
-  const device = detectDevice(userAgent);
-  const os = detectOS(userAgent);
-  const browser = detectBrowser(userAgent);
+    const city =
+      request.headers.get("x-vercel-ip-city") ??
+      "Unknown";
 
-  const { error: eventError } = await supabaseAdmin
-    .from("click_events")
-    .insert({
-      slug,
-      country,
-      city,
-      device,
-      os,
-      browser,
-    });
+    const device = detectDevice(userAgent);
+    const os = detectOS(userAgent);
+    const browser = detectBrowser(userAgent);
 
-  if (eventError) {
-    console.error(
-      "Error guardando evento de clic:",
-      eventError
-    );
-  }
+    const { error: eventError } = await supabaseAdmin
+      .from("click_events")
+      .insert({
+        slug,
+        country,
+        city,
+        device,
+        os,
+        browser,
+      });
 
-  const newClicks = (data.clicks ?? 0) + 1;
+    if (eventError) {
+      console.error(
+        "Error guardando evento de clic:",
+        eventError
+      );
+    }
 
-  const { error: updateError } = await supabaseAdmin
-    .from("links")
-    .update({
-      clicks: newClicks,
-    })
-    .eq("slug", slug);
+    const newClicks = (data.clicks ?? 0) + 1;
 
-  if (updateError) {
-    console.error(
-      "Error actualizando clicks:",
-      updateError
+    const { error: updateError } =
+      await supabaseAdmin
+        .from("links")
+        .update({
+          clicks: newClicks,
+        })
+        .eq("slug", slug);
+
+    if (updateError) {
+      console.error(
+        "Error actualizando clicks:",
+        updateError
+      );
+    }
+  } else {
+    console.log(
+      `JEc LINK ignoró tráfico técnico para el slug ${slug}`
     );
   }
 
