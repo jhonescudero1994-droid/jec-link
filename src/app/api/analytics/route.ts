@@ -221,7 +221,7 @@ export async function GET() {
       error: eventsError,
     } = await supabaseAdmin
       .from("click_events")
-      .select("country, city, device")
+      .select("slug, country, city, device")
       .eq("is_human", true);
 
     if (eventsError) {
@@ -254,6 +254,23 @@ export async function GET() {
     const topDevice = getMostFrequent(
       events.map((event) => event.device)
     );
+    const topLink = getMostFrequent(
+  events.map((event) => event.slug)
+);
+const {
+  data: topLinkData,
+  error: topLinkError,
+} = await supabaseAdmin
+  .from("links")
+  .select("type")
+  .eq("slug", topLink.value)
+  .maybeSingle();
+  if (topLinkError) {
+  console.error(
+    "Error obteniendo tipo del enlace principal:",
+    topLinkError
+  );
+}
 
     return Response.json({
       totalLinks: totalLinks ?? 0,
@@ -268,6 +285,10 @@ export async function GET() {
       topCountry,
       topCity,
       topDevice,
+      topLink: {
+  ...topLink,
+  type: topLinkData?.type ?? "Sin tipo",
+},
     });
   } catch (error) {
     console.error(

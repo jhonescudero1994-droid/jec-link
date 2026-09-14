@@ -30,6 +30,9 @@ const [validClicksToday, setValidClicksToday] = useState(0);
   const [topCityCount, setTopCityCount] = useState(0);
   const [topDevice, setTopDevice] = useState("Sin datos");
   const [topDeviceCount, setTopDeviceCount] = useState(0);
+  const [topLink, setTopLink] = useState("Sin datos");
+const [topLinkCount, setTopLinkCount] = useState(0);
+const [topLinkType, setTopLinkType] = useState("Sin tipo");
 
   useEffect(() => {
     async function loadAnalytics() {
@@ -53,6 +56,9 @@ setValidClicksToday(data.validClicksToday ?? 0);
         setTopCityCount(data.topCity?.count ?? 0);
         setTopDevice(data.topDevice?.value ?? "Sin datos");
         setTopDeviceCount(data.topDevice?.count ?? 0);
+        setTopLink(data.topLink?.value ?? "Sin datos");
+setTopLinkCount(data.topLink?.count ?? 0);
+setTopLinkType(data.topLink?.type ?? "Sin tipo");
       } catch (error) {
         console.error("Error cargando analítica:", error);
       }
@@ -759,7 +765,7 @@ async function generateWhatsApp() {
               </div>
             </div>
 
-            <div className="mt-4 grid gap-4 sm:grid-cols-3">
+            <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
               <div className="rounded-2xl border border-slate-800 bg-slate-950 p-6">
                 <p className="text-sm font-semibold text-slate-400">
                   País principal
@@ -795,6 +801,26 @@ async function generateWhatsApp() {
                   {topDeviceCount} clics
                 </p>
               </div>
+
+              <div className="rounded-2xl border border-slate-800 bg-slate-950 p-6">
+  <p className="text-sm font-semibold text-slate-400">
+    Enlace principal
+  </p>
+
+  <p className="mt-2 text-lg font-bold text-white">
+    {topLinkType === "whatsapp"
+  ? "WhatsApp"
+  : topLinkType}
+  </p>
+
+  <p className="mt-1 text-3xl font-black text-cyan-400">
+    {topLink}
+  </p>
+
+  <p className="mt-2 text-sm text-slate-500">
+    {topLinkCount} clics válidos
+  </p>
+</div>
             </div>
           </section>
         )}
