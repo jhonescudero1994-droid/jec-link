@@ -14,17 +14,27 @@ const supabaseAdmin = createClient(
   }
 );
 
+function cleanValue(value: string | null) {
+  if (!value) return null;
+
+  try {
+    return decodeURIComponent(value).trim();
+  } catch {
+    return value.trim();
+  }
+}
+
 function getMostFrequent(values: (string | null)[]) {
   const counts: Record<string, number> = {};
 
   for (const value of values) {
-    if (!value) continue;
+    const cleaned = cleanValue(value);
 
-    const cleanValue = decodeURIComponent(value).trim();
+    if (!cleaned || cleaned === "Unknown") {
+      continue;
+    }
 
-    if (!cleanValue) continue;
-
-    counts[cleanValue] = (counts[cleanValue] ?? 0) + 1;
+    counts[cleaned] = (counts[cleaned] ?? 0) + 1;
   }
 
   let topValue = "";
@@ -42,18 +52,73 @@ function getMostFrequent(values: (string | null)[]) {
     count: topCount,
   };
 }
+function getChileStartOfToday() {
+  const timeZone = "America/Santiago";
+  const now = new Date();
+
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+
+  const year = Number(
+    parts.find((part) => part.type === "year")?.value
+  );
+
+  const month = Number(
+    parts.find((part) => part.type === "month")?.value
+  );
+
+  const day = Number(
+    parts.find((part) => part.type === "day")?.value
+  );
+
+  const utcGuess = new Date(
+    Date.UTC(year, month - 1, day, 0, 0, 0)
+  );
+
+  const chileParts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(utcGuess);
+
+  const chileAsUtc = Date.UTC(
+    Number(chileParts.find((part) => part.type === "year")?.value),
+    Number(chileParts.find((part) => part.type === "month")?.value) - 1,
+    Number(chileParts.find((part) => part.type === "day")?.value),
+    Number(chileParts.find((part) => part.type === "hour")?.value),
+    Number(chileParts.find((part) => part.type === "minute")?.value),
+    Number(chileParts.find((part) => part.type === "second")?.value)
+  );
+
+  const offset = chileAsUtc - utcGuess.getTime();
+
+  return new Date(utcGuess.getTime() - offset);
+}
 
 export async function GET() {
   try {
-    const { count: totalLinks, error: linksError } = await supabaseAdmin
-      .from("links")
-      .select("*", {
-        count: "exact",
-        head: true,
-      });
+    const { count: totalLinks, error: linksError } =
+      await supabaseAdmin
+        .from("links")
+        .select("*", {
+          count: "exact",
+          head: true,
+        });
 
     if (linksError) {
-      console.error("Error contando enlaces:", linksError);
+      console.error(
+        "Error contando enlaces:",
+        linksError
+      );
 
       return Response.json(
         {
@@ -65,15 +130,19 @@ export async function GET() {
       );
     }
 
-    const { count: totalClicks, error: clicksError } = await supabaseAdmin
-      .from("click_events")
-      .select("*", {
-        count: "exact",
-        head: true,
-      });
+    const { count: totalClicks, error: clicksError } =
+      await supabaseAdmin
+        .from("click_events")
+        .select("*", {
+          count: "exact",
+          head: true,
+        });
 
     if (clicksError) {
-      console.error("Error contando clics:", clicksError);
+      console.error(
+        "Error contando clics totales:",
+        clicksError
+      );
 
       return Response.json(
         {
@@ -85,23 +154,61 @@ export async function GET() {
       );
     }
 
-    const startOfToday = new Date();
-    startOfToday.setHours(0, 0, 0, 0);
-
-    const { count: clicksToday, error: todayError } = await supabaseAdmin
+    const {
+      count: validClicks,
+      error: validClicksError,
+    } = await supabaseAdmin
       .from("click_events")
       .select("*", {
         count: "exact",
         head: true,
       })
-      .gte("created_at", startOfToday.toISOString());
+      .eq("is_human", true);
+
+    if (validClicksError) {
+      console.error(
+        "Error contando clics válidos:",
+        validClicksError
+      );
+
+      return Response.json(
+        {
+          error:
+            "No se pudieron obtener los clics válidos.",
+        },
+        {
+          status: 500,
+        }
+      );
+    }
+
+   const startOfToday = getChileStartOfToday();
+
+    const {
+      count: validClicksToday,
+      error: todayError,
+    } = await supabaseAdmin
+      .from("click_events")
+      .select("*", {
+        count: "exact",
+        head: true,
+      })
+      .eq("is_human", true)
+      .gte(
+        "created_at",
+        startOfToday.toISOString()
+      );
 
     if (todayError) {
-      console.error("Error contando clics de hoy:", todayError);
+      console.error(
+        "Error contando clics válidos de hoy:",
+        todayError
+      );
 
       return Response.json(
         {
-          error: "No se pudieron obtener los clics de hoy.",
+          error:
+            "No se pudieron obtener los clics válidos de hoy.",
         },
         {
           status: 500,
@@ -109,16 +216,24 @@ export async function GET() {
       );
     }
 
-    const { data: clickEvents, error: eventsError } = await supabaseAdmin
+    const {
+      data: validEvents,
+      error: eventsError,
+    } = await supabaseAdmin
       .from("click_events")
-      .select("country, city, device");
+      .select("country, city, device")
+      .eq("is_human", true);
 
     if (eventsError) {
-      console.error("Error obteniendo eventos:", eventsError);
+      console.error(
+        "Error obteniendo eventos válidos:",
+        eventsError
+      );
 
       return Response.json(
         {
-          error: "No se pudieron obtener los datos de analítica.",
+          error:
+            "No se pudieron obtener los datos de analítica.",
         },
         {
           status: 500,
@@ -126,7 +241,7 @@ export async function GET() {
       );
     }
 
-    const events = clickEvents ?? [];
+    const events = validEvents ?? [];
 
     const topCountry = getMostFrequent(
       events.map((event) => event.country)
@@ -142,15 +257,23 @@ export async function GET() {
 
     return Response.json({
       totalLinks: totalLinks ?? 0,
+
       totalClicks: totalClicks ?? 0,
-      clicksToday: clicksToday ?? 0,
+
+      validClicks: validClicks ?? 0,
+
+      validClicksToday:
+        validClicksToday ?? 0,
 
       topCountry,
       topCity,
       topDevice,
     });
   } catch (error) {
-    console.error("Error en API de analítica:", error);
+    console.error(
+      "Error en API de analítica:",
+      error
+    );
 
     return Response.json(
       {

@@ -19,9 +19,10 @@ export default function Home() {
   const [mode, setMode] = useState<Mode>("whatsapp");
   const [showAnalytics, setShowAnalytics] = useState(false);
 
-  const [totalLinks, setTotalLinks] = useState(0);
-  const [totalClicks, setTotalClicks] = useState(0);
-  const [clicksToday, setClicksToday] = useState(0);
+ const [totalLinks, setTotalLinks] = useState(0);
+const [totalClicks, setTotalClicks] = useState(0);
+const [validClicks, setValidClicks] = useState(0);
+const [validClicksToday, setValidClicksToday] = useState(0);
 
   const [topCountry, setTopCountry] = useState("Sin datos");
   const [topCountryCount, setTopCountryCount] = useState(0);
@@ -43,7 +44,8 @@ export default function Home() {
 
         setTotalLinks(data.totalLinks ?? 0);
         setTotalClicks(data.totalClicks ?? 0);
-        setClicksToday(data.clicksToday ?? 0);
+        setValidClicks(data.validClicks ?? 0);
+setValidClicksToday(data.validClicksToday ?? 0);
 
         setTopCountry(data.topCountry?.value ?? "Sin datos");
         setTopCountryCount(data.topCountry?.count ?? 0);
@@ -720,7 +722,7 @@ async function generateWhatsApp() {
               </p>
             </div>
 
-            <div className="mt-6 grid gap-4 sm:grid-cols-3">
+            <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
               <div className="rounded-2xl border border-slate-800 bg-slate-950 p-6">
                 <p className="text-sm font-semibold text-slate-400">
                   Enlaces creados
@@ -730,21 +732,29 @@ async function generateWhatsApp() {
                 </p>
               </div>
 
-              <div className="rounded-2xl border border-slate-800 bg-slate-950 p-6">
-                <p className="text-sm font-semibold text-slate-400">
-                  Clics registrados
-                </p>
-                <p className="mt-2 text-4xl font-black text-cyan-400">
-                  {totalClicks}
-                </p>
-              </div>
+             <div className="rounded-2xl border border-slate-800 bg-slate-950 p-6">
+  <p className="text-sm font-semibold text-slate-400">
+    Clics registrados
+  </p>
+  <p className="mt-2 text-4xl font-black text-cyan-400">
+    {totalClicks}
+  </p>
+</div>
 
+<div className="rounded-2xl border border-slate-800 bg-slate-950 p-6">
+  <p className="text-sm font-semibold text-slate-400">
+    Clics válidos
+  </p>
+  <p className="mt-2 text-4xl font-black text-cyan-400">
+    {validClicks}
+  </p>
+</div>
               <div className="rounded-2xl border border-slate-800 bg-slate-950 p-6">
                 <p className="text-sm font-semibold text-slate-400">
-                  Clics de hoy
+                  Clics válidos hoy
                 </p>
                 <p className="mt-2 text-4xl font-black text-cyan-400">
-                  {clicksToday}
+                  {validClicksToday}
                 </p>
               </div>
             </div>
