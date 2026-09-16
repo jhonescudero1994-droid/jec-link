@@ -19,6 +19,12 @@ export default function Home() {
   const [mode, setMode] = useState<Mode>("whatsapp");
   const [showAnalytics, setShowAnalytics] = useState(false);
 
+  const [adminEmail, setAdminEmail] = useState("");
+const [adminPassword, setAdminPassword] = useState("");
+const [isAuthenticated, setIsAuthenticated] = useState(false);
+const [loginError, setLoginError] = useState("");
+const [showAdminLogin, setShowAdminLogin] = useState(false);
+
  const [totalLinks, setTotalLinks] = useState(0);
 const [totalClicks, setTotalClicks] = useState(0);
 const [validClicks, setValidClicks] = useState(0);
@@ -35,11 +41,23 @@ const [topLinkCount, setTopLinkCount] = useState(0);
 const [topLinkType, setTopLinkType] = useState("Sin tipo");
 
   useEffect(() => {
-    async function loadAnalytics() {
-      try {
-        const response = await fetch("/api/analytics");
+   async function loadAnalytics() {
+  try {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
 
-        if (!response.ok) {
+    if (!session) {
+      return;
+    }
+
+    const response = await fetch("/api/analytics", {
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+      },
+    });
+
+    if (!response.ok) {
           throw new Error("No se pudo cargar la analítica.");
         }
 
@@ -319,6 +337,37 @@ async function generateWhatsApp() {
     setCopied(false);
   }
 
+  async function handleAdminLogin() {
+  setLoginError("");
+
+  const { error } = await supabase.auth.signInWithPassword({
+    email: adminEmail,
+    password: adminPassword,
+  });
+
+  if (error) {
+    setIsAuthenticated(false);
+    setLoginError("Correo o contraseña incorrectos.");
+    return;
+  }
+
+  setIsAuthenticated(true);
+  setShowAdminLogin(false);
+setShowAnalytics(true);
+  setAdminPassword("");
+}
+
+async function handleAdminLogout() {
+  await supabase.auth.signOut();
+
+  setIsAuthenticated(false);
+  setShowAnalytics(false);
+  setShowAdminLogin(false);
+  setAdminEmail("");
+  setAdminPassword("");
+  setLoginError("");
+}
+
  function changeMode(newMode: Mode) {
   setShowAnalytics(false);
   setMode(newMode);
@@ -406,8 +455,27 @@ async function generateWhatsApp() {
           </p>
         </header>
 
-        <section className="mb-7">
-          <div className="grid grid-cols-2 gap-2 rounded-2xl border border-slate-800 bg-slate-900 p-2 sm:grid-cols-3 lg:grid-cols-6">
+        <section className="mb-7 flex flex-col gap-3 lg:flex-row">
+  <div className="lg:w-44">
+  <button
+    onClick={() => {
+  if (isAuthenticated) {
+    setShowAnalytics(true);
+  } else {
+    setShowAnalytics(false);
+    setShowAdminLogin(true);
+    setLoginError("");
+  }
+}}
+    className={`w-full rounded-xl px-5 py-3 text-sm font-bold transition ${
+      showAnalytics
+        ? "bg-cyan-400 text-slate-950"
+        : "bg-slate-900 text-slate-300 hover:bg-slate-800"
+    }`}
+  >
+    📊 Analítica
+  </button>
+</div>         <div className="grid grid-cols-2 gap-2 rounded-2xl border border-slate-800 bg-slate-900 p-2 sm:grid-cols-3 lg:grid-cols-6">
             {tools.map((tool) => (
               <button
                 key={tool.id}
@@ -423,18 +491,58 @@ async function generateWhatsApp() {
                 {tool.label}
               </button>
             ))}
-            <button
-  onClick={() => setShowAnalytics(true)}
-  className={`rounded-xl px-3 py-3 text-sm font-bold transition ${
-    showAnalytics
-      ? "bg-cyan-400 text-slate-950"
-      : "text-slate-400 hover:bg-slate-800"
-  }`}
->
-  📊 Analítica
-</button>
+         
           </div>
         </section>
+
+        {showAdminLogin && !isAuthenticated && (
+  <section className="mb-7 rounded-2xl border border-slate-800 bg-slate-900 p-6">
+    <div className="mx-auto max-w-md">
+      <div className="text-center">
+        <p className="text-3xl">🔐</p>
+
+        <h2 className="mt-3 text-2xl font-black text-white">
+          Acceso a Analítica
+        </h2>
+
+        <p className="mt-2 text-sm text-slate-400">
+          Inicia sesión para acceder a los datos privados de JEc LINK.
+        </p>
+      </div>
+
+      <div className="mt-6 space-y-4">
+        <input
+          type="email"
+          value={adminEmail}
+          onChange={(e) => setAdminEmail(e.target.value)}
+          placeholder="Correo electrónico"
+          className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-cyan-400"
+        />
+
+        <input
+          type="password"
+          value={adminPassword}
+          onChange={(e) => setAdminPassword(e.target.value)}
+          placeholder="Contraseña"
+          className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-cyan-400"
+        />
+
+        {loginError && (
+          <p className="text-sm font-semibold text-red-400">
+            {loginError}
+          </p>
+        )}
+
+        <button
+          onClick={handleAdminLogin}
+          className="w-full rounded-xl bg-cyan-400 px-4 py-3 font-black text-slate-950 transition hover:bg-cyan-300"
+        >
+          Iniciar sesión
+        </button>
+      </div>
+    </div>
+  </section>
+)}
 
         <section
   className={`grid gap-6 lg:grid-cols-2 ${
@@ -713,7 +821,13 @@ async function generateWhatsApp() {
         </section>
 
         {showAnalytics && (
-          <section className="mt-8 rounded-2xl border border-cyan-500/30 bg-slate-900 p-6">
+          <section className="relative mt-8 rounded-2xl border border-cyan-500/30 bg-slate-900 p-6">
+            <button
+  onClick={handleAdminLogout}
+  className="absolute right-6 top-6 rounded-lg border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-400 transition hover:border-red-400 hover:text-red-400"
+>
+  🔒 Cerrar sesión
+</button>
             <div className="text-center">
               <p className="text-xs font-bold uppercase tracking-[0.25em] text-cyan-400">
                 Analítica JEc LINK

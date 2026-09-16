@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { NextRequest } from "next/server";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseSecretKey = process.env.SUPABASE_SECRET_KEY!;

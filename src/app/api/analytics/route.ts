@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { NextRequest } from "next/server";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseSecretKey = process.env.SUPABASE_SECRET_KEY!;
@@ -104,8 +105,39 @@ function getChileStartOfToday() {
   return new Date(utcGuess.getTime() - offset);
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+        const authHeader = request.headers.get("authorization");
+    const accessToken = authHeader?.replace("Bearer ", "");
+    if (!accessToken) {
+  return Response.json(
+    { error: "No autorizado." },
+    { status: 401 }
+  );
+}
+
+const {
+  data: { user },
+  error: authError,
+} = await supabaseAdmin.auth.getUser(accessToken);
+
+if (authError || !user) {
+  return Response.json(
+    { error: "Sesión inválida o expirada." },
+    { status: 401 }
+  );
+}
+const adminEmail = process.env.ADMIN_EMAIL;
+
+if (
+  !adminEmail ||
+  user.email?.toLowerCase() !== adminEmail.toLowerCase()
+) {
+  return Response.json(
+    { error: "Acceso restringido al administrador." },
+    { status: 403 }
+  );
+}
     const { count: totalLinks, error: linksError } =
       await supabaseAdmin
         .from("links")
