@@ -82,9 +82,12 @@ setTopLinkType(data.topLink?.type ?? "Sin tipo");
       }
     }
 
-    loadAnalytics();
-  }, []);
-  const [phone, setPhone] = useState("");
+    if (isAuthenticated) {
+      loadAnalytics();
+    }
+  }, [isAuthenticated]);
+  
+    const [phone, setPhone] = useState("");
   const [message, setMessage] = useState("");
 
   const [website, setWebsite] = useState("");
