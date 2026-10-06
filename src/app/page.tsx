@@ -258,24 +258,23 @@ useEffect(() => {
 
     loadProjectStatsForHistory();
   }, [isAuthenticated, mainView]);
+useEffect(() => {
+  async function loadHistory() {
+    if ((mainView !== "history" && mainView !== "analytics") || !isAuthenticated) {
+      return;
+    }
 
-  useEffect(() => {
-    async function loadHistory() {
-      if ((mainView !== "history" && mainView !== "analytics") || !isAuthenticated) {
-        return;
-      }
+    setHistoryLoading(true);
+    setHistoryError("");
 
-      setHistoryLoading(true);
-      setHistoryError("");
-
-      const { data, error } = await supabase
-        .from("links")
-        .select(
-          "id,project_name,type,content,generated_url,message,slug,clicks,created_at,archived",
-        )
-        .eq("archived", false)
-        .order("created_at", { ascending: false });
-
+    const { data, error } = await supabase
+      .from("links")
+      .select(
+        "id,project_name,type,content,generated_url,message,slug,clicks,created_at,archived",
+      )
+      .eq("archived", false)
+      .order("created_at", { ascending: false });
+    
       if (error) {
         console.error("Error cargando Mis QR:", error);
         setHistoryError(
