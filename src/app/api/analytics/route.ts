@@ -50,6 +50,15 @@ function getMostFrequent(values: (string | null)[]) {
   };
 }
 
+function getChileDateKey(date: Date) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Santiago",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
 function getChileStartOfToday() {
   const timeZone = "America/Santiago";
   const now = new Date();
@@ -211,6 +220,7 @@ export async function GET(request: NextRequest) {
           type: selectedSlug ? project?.type ?? "Sin tipo" : "Sin tipo",
         },
         projectStats: {},
+        dailyClicksBySlug: {},
       });
     }
 
@@ -341,6 +351,23 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    const dailyClicksBySlug: Record<string, Record<string, number>> = {};
+
+    for (const slug of activeSlugs) {
+      dailyClicksBySlug[slug] = {};
+    }
+
+    for (const event of events) {
+      if (!dailyClicksBySlug[event.slug]) {
+        continue;
+      }
+
+      const dateKey = getChileDateKey(new Date(event.created_at));
+
+      dailyClicksBySlug[event.slug][dateKey] =
+        (dailyClicksBySlug[event.slug][dateKey] ?? 0) + 1;
+    }
+
     const topCountry = getMostFrequent(
       events.map((event) => event.country),
     );
@@ -397,6 +424,7 @@ export async function GET(request: NextRequest) {
         type: selectedSlug ? project?.type ?? "Sin tipo" : topLinkType,
       },
       projectStats,
+      dailyClicksBySlug,
     });
   } catch (error) {
     console.error("Error en API de analítica:", error);

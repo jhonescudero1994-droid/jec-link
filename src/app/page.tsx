@@ -12,10 +12,11 @@ import { supabase } from "@/lib/supabase";
 
 type Mode = "whatsapp" | "web" | "phone" | "sms" | "email" | "text";
 
-type MainView = "create" | "history" | "analytics";
+type MainView = "create" | "history" | "projects" | "analytics";
 
 type LinkRecord = {
   id: number;
+  project_id: string | null;
   project_name: string | null;
   type: Mode;
   content: string | null;
@@ -27,12 +28,57 @@ type LinkRecord = {
   archived: boolean;
 };
 
+type ProjectRecord = {
+  id: string;
+  name: string;
+  description: string | null;
+  created_at: string;
+  archived: boolean;
+};
+
 type ProjectAnalyticsStats = {
   totalClicks: number;
   validClicks: number;
   validClicksToday: number;
 };
 
+
+type AnalyticsRange = "7" | "30" | "all";
+
+function getChileDateKey(date: Date) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Santiago",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
+function getRecentChileDateKeys(days: number) {
+  const keys: string[] = [];
+  const now = new Date();
+
+  for (let offset = days - 1; offset >= 0; offset--) {
+    const date = new Date(now);
+    date.setDate(date.getDate() - offset);
+    keys.push(getChileDateKey(date));
+  }
+
+  return Array.from(new Set(keys));
+}
+
+function formatChartDate(dateKey: string) {
+  return new Date(`${dateKey}T12:00:00`).toLocaleDateString("es-CL", {
+    day: "2-digit",
+    month: "short",
+  });
+}
+
+const PUBLIC_APP_URL = "https://jec-link.vercel.app";
+
+function getShortLink(slug: string) {
+  return `${PUBLIC_APP_URL}/l/${slug}`;
+}
 
 const tools: { id: Mode; label: string }[] = [
 
@@ -111,6 +157,11 @@ const [deletingId, setDeletingId] = useState<number | null>(null);
 const [editingId, setEditingId] = useState<number | null>(null);
 const [editingProjectName, setEditingProjectName] = useState("");
 const [savingProjectName, setSavingProjectName] = useState(false);
+
+const [editingMessageId, setEditingMessageId] = useState<number | null>(null);
+const [editingMessage, setEditingMessage] = useState("");
+const [savingMessage, setSavingMessage] = useState(false);
+
 const [selectedAnalyticsSlug, setSelectedAnalyticsSlug] = useState<string | null>(null);
 const [analyticsSearch, setAnalyticsSearch] = useState("");
 const [analyticsLoading, setAnalyticsLoading] = useState(false);
@@ -123,6 +174,23 @@ const [selectedProjectName, setSelectedProjectName] = useState("");
 const [selectedProjectType, setSelectedProjectType] = useState("");
 const [selectedProjectUrl, setSelectedProjectUrl] = useState("");
 const [projectStats, setProjectStats] = useState<Record<string, ProjectAnalyticsStats>>({});
+const [projectDailyStats, setProjectDailyStats] = useState<Record<string, Record<string, number>>>({});
+const [projectAnalyticsRange, setProjectAnalyticsRange] = useState<AnalyticsRange>("7");
+const [projects, setProjects] = useState<ProjectRecord[]>([]);
+const [projectsLoading, setProjectsLoading] = useState(false);
+const [projectsError, setProjectsError] = useState("");
+const [newProjectName, setNewProjectName] = useState("");
+const [creatingProject, setCreatingProject] = useState(false);
+const [selectedProjectId, setSelectedProjectId] = useState("");
+const [selectedProjectDetailId, setSelectedProjectDetailId] = useState<string | null>(null);
+const [selectedProjectAnalyticsId, setSelectedProjectAnalyticsId] = useState<string | null>(null);
+const [updatingProjectLinkId, setUpdatingProjectLinkId] = useState<number | null>(null);
+const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
+const [editingProjectTitle, setEditingProjectTitle] = useState("");
+const [savingProjectEditId, setSavingProjectEditId] = useState<string | null>(null);
+const [archivingProjectId, setArchivingProjectId] = useState<string | null>(null);
+const [restoringProjectId, setRestoringProjectId] = useState<string | null>(null);
+const [exportingProjectId, setExportingProjectId] = useState<string | null>(null);
 
 useEffect(() => {
   let mounted = true;
@@ -144,6 +212,37 @@ useEffect(() => {
     authListener.subscription.unsubscribe();
   };
 }, []);
+
+  useEffect(() => {
+    async function loadProjects() {
+      if (!isAuthenticated) {
+        setProjects([]);
+        return;
+      }
+
+      setProjectsLoading(true);
+      setProjectsError("");
+
+      const { data, error } = await supabase
+        .from("projects")
+        .select("id,name,description,created_at,archived")
+        .order("created_at", { ascending: false });
+
+      if (error) {
+        console.error("Error cargando proyectos:", error);
+        setProjectsError(
+          "No se pudieron cargar los proyectos. Verifica que hayas ejecutado la migración de Supabase.",
+        );
+        setProjects([]);
+      } else {
+        setProjects((data ?? []) as ProjectRecord[]);
+      }
+
+      setProjectsLoading(false);
+    }
+
+    loadProjects();
+  }, [isAuthenticated]);
 
   useEffect(() => {
     async function loadAnalytics() {
@@ -206,6 +305,13 @@ useEffect(() => {
         if (data.projectStats && typeof data.projectStats === "object") {
           setProjectStats(data.projectStats);
         }
+
+        if (
+          data.dailyClicksBySlug &&
+          typeof data.dailyClicksBySlug === "object"
+        ) {
+          setProjectDailyStats(data.dailyClicksBySlug);
+        }
       } catch (error) {
         console.error("Error cargando analítica:", error);
         setAnalyticsError(
@@ -223,7 +329,7 @@ useEffect(() => {
 
   useEffect(() => {
     async function loadProjectStatsForHistory() {
-      if (!isAuthenticated || mainView !== "history") {
+      if (!isAuthenticated || (mainView !== "history" && mainView !== "projects")) {
         return;
       }
 
@@ -251,6 +357,13 @@ useEffect(() => {
         if (data.projectStats && typeof data.projectStats === "object") {
           setProjectStats(data.projectStats);
         }
+
+        if (
+          data.dailyClicksBySlug &&
+          typeof data.dailyClicksBySlug === "object"
+        ) {
+          setProjectDailyStats(data.dailyClicksBySlug);
+        }
       } catch (error) {
         console.error("Error cargando métricas de proyectos:", error);
       }
@@ -260,7 +373,7 @@ useEffect(() => {
   }, [isAuthenticated, mainView]);
 useEffect(() => {
   async function loadHistory() {
-    if ((mainView !== "history" && mainView !== "analytics") || !isAuthenticated) {
+    if ((mainView !== "history" && mainView !== "analytics" && mainView !== "projects") || !isAuthenticated) {
       return;
     }
 
@@ -270,7 +383,7 @@ useEffect(() => {
     const { data, error } = await supabase
       .from("links")
       .select(
-        "id,project_name,type,content,generated_url,message,slug,clicks,created_at,archived",
+        "id,project_id,project_name,type,content,generated_url,message,slug,clicks,created_at,archived",
       )
       .eq("archived", false)
       .order("created_at", { ascending: false });
@@ -328,6 +441,8 @@ useEffect(() => {
   const [qr, setQr] = useState("");
 
   const [copied, setCopied] = useState(false);
+  const [previewQrId, setPreviewQrId] = useState<number | null>(null);
+  const [previewQrImage, setPreviewQrImage] = useState("");
 
 
 
@@ -429,57 +544,49 @@ useEffect(() => {
 
 type SaveLinkResult =
   | { status: "created"; slug: string }
-  | { status: "duplicate" }
   | { status: "error" };
 
 async function saveToSupabase(value: string): Promise<SaveLinkResult> {
+  const maxAttempts = 5;
 
-  const slug = generateSlug();
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const slug = generateSlug();
 
-  const { error } = await supabase.from("links").insert({
+    const { error } = await supabase.from("links").insert({
+      project_id: selectedProjectId || null,
+      project_name: projectName.trim(),
+      type: mode,
+      content: getOriginalContent(),
+      generated_url: value,
+      message: getMessageContent(),
+      slug,
+      clicks: 0,
+    });
 
-    project_name: projectName.trim(),
+    if (!error) {
+      console.log("JEc LINK guardado correctamente en Supabase.");
+      console.log("Slug generado:", slug);
 
-    type: mode,
-
-    content: getOriginalContent(),
-
-    generated_url: value,
-
-    message: getMessageContent(),
-
-    slug,
-
-    clicks: 0,
-
-  });
-
-
-
-  if (error) {
+      return { status: "created", slug };
+    }
 
     if (error.code === "23505") {
-      return { status: "duplicate" };
+      console.warn(
+        "Colisión de código corto detectada. Generando un nuevo slug...",
+      );
+      continue;
     }
 
     console.error("Error guardando en Supabase:", error);
-
     return { status: "error" };
-
   }
 
+  console.error(
+    "No se pudo generar un slug único después de varios intentos.",
+  );
 
-
-  console.log("JEc LINK guardado correctamente en Supabase.");
-
-  console.log("Slug generado:", slug);
-
-
-
-  return { status: "created", slug };
-
+  return { status: "error" };
 }
-
 
 
 async function createQR(value: string) {
@@ -493,22 +600,6 @@ async function createQR(value: string) {
 
     const saveResult = await saveToSupabase(value);
 
-    if (saveResult.status === "duplicate") {
-      alert(
-        "Este destino ya tiene un QR guardado en JEc LINK. No se creó un duplicado. Revisa Mis QR para reutilizarlo.",
-      );
-
-      setMainView("history");
-      setShowAnalytics(false);
-
-      if (!isAuthenticated) {
-        setShowAdminLogin(true);
-        setLoginError("");
-      }
-
-      return;
-    }
-
     if (saveResult.status === "error") {
       alert("No se pudo crear el enlace corto.");
       return;
@@ -516,7 +607,7 @@ async function createQR(value: string) {
 
     const slug = saveResult.slug;
 
-    const shortLink = `${window.location.origin}/l/${slug}`;
+    const shortLink = getShortLink(slug);
 
 
 
@@ -816,7 +907,7 @@ async function generateWhatsApp() {
       return;
     }
 
-    const shortLink = `${window.location.origin}/l/${slug}`;
+    const shortLink = getShortLink(slug);
 
     try {
       await navigator.clipboard.writeText(shortLink);
@@ -833,7 +924,7 @@ async function generateWhatsApp() {
     }
 
     try {
-      const shortLink = `${window.location.origin}/l/${link.slug}`;
+      const shortLink = getShortLink(link.slug);
       const qrImage = await QRCode.toDataURL(shortLink, {
         width: 1000,
         margin: 2,
@@ -855,6 +946,34 @@ async function generateWhatsApp() {
     } catch (error) {
       console.error("Error descargando QR del historial:", error);
       alert("No se pudo descargar el QR.");
+    }
+  }
+
+  async function previewHistoryQR(link: LinkRecord) {
+    if (!link.slug) {
+      alert("Este registro antiguo no tiene código corto para previsualizar.");
+      return;
+    }
+
+    if (previewQrId === link.id) {
+      setPreviewQrId(null);
+      setPreviewQrImage("");
+      return;
+    }
+
+    try {
+      const shortLink = getShortLink(link.slug);
+      const qrImage = await QRCode.toDataURL(shortLink, {
+        width: 700,
+        margin: 2,
+        errorCorrectionLevel: "H",
+      });
+
+      setPreviewQrId(link.id);
+      setPreviewQrImage(qrImage);
+    } catch (error) {
+      console.error("Error previsualizando QR:", error);
+      alert("No se pudo generar la previsualización del QR.");
     }
   }
 
@@ -907,6 +1026,97 @@ async function generateWhatsApp() {
     setEditingId(null);
     setEditingProjectName("");
     setSavingProjectName(false);
+  }
+
+  function startEditingMessage(link: LinkRecord) {
+    setEditingMessageId(link.id);
+    setEditingMessage(link.message || "");
+  }
+
+  function cancelEditingMessage() {
+    setEditingMessageId(null);
+    setEditingMessage("");
+  }
+
+  function previewWhatsAppMessage(link: LinkRecord) {
+    if (link.type !== "whatsapp") {
+      return;
+    }
+
+    const cleanPhone = (link.content || "").replace(/\D/g, "");
+
+    if (!cleanPhone) {
+      alert("Este QR no tiene un número de WhatsApp válido.");
+      return;
+    }
+
+    const cleanMessage = editingMessage.trim();
+
+    const previewUrl =
+      `https://wa.me/${cleanPhone}` +
+      (cleanMessage ? `?text=${encodeURIComponent(cleanMessage)}` : "");
+
+    window.open(previewUrl, "_blank", "noopener,noreferrer");
+  }
+
+  async function saveWhatsAppMessage(link: LinkRecord) {
+    if (link.type !== "whatsapp") {
+      return;
+    }
+
+    const cleanPhone = (link.content || "").replace(/\D/g, "");
+
+    if (!cleanPhone) {
+      alert("Este QR no tiene un número de WhatsApp válido.");
+      return;
+    }
+
+    const cleanMessage = editingMessage.trim();
+
+    const newGeneratedUrl =
+      `https://wa.me/${cleanPhone}` +
+      (cleanMessage ? `?text=${encodeURIComponent(cleanMessage)}` : "");
+
+    setSavingMessage(true);
+
+    const { error } = await supabase
+      .from("links")
+      .update({
+        message: cleanMessage || null,
+        generated_url: newGeneratedUrl,
+      })
+      .eq("id", link.id);
+
+    if (error) {
+      console.error("Error actualizando mensaje de WhatsApp:", error);
+      alert(
+        "No se pudo actualizar el mensaje. Revisa los permisos de Supabase.",
+      );
+      setSavingMessage(false);
+      return;
+    }
+
+    setHistoryLinks((current) =>
+      current.map((item) =>
+        item.id === link.id
+          ? {
+              ...item,
+              message: cleanMessage || null,
+              generated_url: newGeneratedUrl,
+            }
+          : item,
+      ),
+    );
+
+    if (link.slug && selectedAnalyticsSlug === link.slug) {
+      setSelectedProjectUrl(newGeneratedUrl);
+    }
+
+    setEditingMessageId(null);
+    setEditingMessage("");
+    setSavingMessage(false);
+
+    alert("Mensaje de WhatsApp actualizado correctamente.");
   }
 
   async function deleteHistoryLink(link: LinkRecord) {
@@ -976,6 +1186,637 @@ async function generateWhatsApp() {
 
       setDeletingId(null);
     }
+  }
+
+  function startEditingProject(project: ProjectRecord) {
+    setEditingProjectId(project.id);
+    setEditingProjectTitle(project.name);
+  }
+
+  function cancelEditingProject() {
+    setEditingProjectId(null);
+    setEditingProjectTitle("");
+  }
+
+  async function saveProjectTitle(project: ProjectRecord) {
+    const cleanName = editingProjectTitle.trim();
+
+    if (!cleanName) {
+      alert("Escribe un nombre para el proyecto.");
+      return;
+    }
+
+    setSavingProjectEditId(project.id);
+
+    const { error } = await supabase
+      .from("projects")
+      .update({ name: cleanName })
+      .eq("id", project.id);
+
+    if (error) {
+      console.error("Error actualizando proyecto:", error);
+
+      if (error.code === "23505") {
+        alert("Ya existe otro proyecto activo con ese nombre.");
+      } else {
+        alert("No se pudo actualizar el proyecto.");
+      }
+
+      setSavingProjectEditId(null);
+      return;
+    }
+
+    setProjects((current) =>
+      current.map((item) =>
+        item.id === project.id ? { ...item, name: cleanName } : item,
+      ),
+    );
+
+    setEditingProjectId(null);
+    setEditingProjectTitle("");
+    setSavingProjectEditId(null);
+  }
+
+  async function archiveProject(project: ProjectRecord) {
+    const linkedQrCount = historyLinks.filter(
+      (link) => link.project_id === project.id,
+    ).length;
+
+    const confirmed = window.confirm(
+      `¿Archivar "${project.name}"?\n\nSus ${linkedQrCount} QR/campañas seguirán activos y conservarán sus datos y analítica. El proyecto dejará de aparecer entre los proyectos activos hasta que lo restaures.`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setArchivingProjectId(project.id);
+
+    const { error } = await supabase
+      .from("projects")
+      .update({ archived: true })
+      .eq("id", project.id);
+
+    if (error) {
+      console.error("Error archivando proyecto:", error);
+      alert("No se pudo archivar el proyecto.");
+      setArchivingProjectId(null);
+      return;
+    }
+
+    setProjects((current) =>
+      current.map((item) =>
+        item.id === project.id ? { ...item, archived: true } : item,
+      ),
+    );
+
+    if (selectedProjectDetailId === project.id) {
+      setSelectedProjectDetailId(null);
+    }
+
+    if (selectedProjectAnalyticsId === project.id) {
+      setSelectedProjectAnalyticsId(null);
+    }
+
+    if (selectedProjectId === project.id) {
+      setSelectedProjectId("");
+    }
+
+    setArchivingProjectId(null);
+  }
+
+  async function restoreProject(project: ProjectRecord) {
+    setRestoringProjectId(project.id);
+
+    const { error } = await supabase
+      .from("projects")
+      .update({ archived: false })
+      .eq("id", project.id);
+
+    if (error) {
+      console.error("Error restaurando proyecto:", error);
+
+      if (error.code === "23505") {
+        alert(
+          "No se puede restaurar porque ya existe un proyecto activo con el mismo nombre.",
+        );
+      } else {
+        alert("No se pudo restaurar el proyecto.");
+      }
+
+      setRestoringProjectId(null);
+      return;
+    }
+
+    setProjects((current) =>
+      current.map((item) =>
+        item.id === project.id ? { ...item, archived: false } : item,
+      ),
+    );
+
+    setRestoringProjectId(null);
+  }
+
+  async function exportProjectReport(
+    project: ProjectRecord,
+    campaigns: LinkRecord[],
+  ) {
+    const reportWindow = window.open("", "_blank");
+
+    if (!reportWindow) {
+      alert(
+        "El navegador bloqueó la ventana del reporte. Permite ventanas emergentes para JEc LINK e inténtalo nuevamente.",
+      );
+      return;
+    }
+
+    reportWindow.document.write(
+      "<!doctype html><html><head><title>Generando reporte...</title></head><body style='font-family:Arial,sans-serif;padding:40px'>Generando reporte de JEc LINK...</body></html>",
+    );
+    reportWindow.document.close();
+
+    setExportingProjectId(project.id);
+
+    try {
+      const rangeDates =
+        projectAnalyticsRange === "all"
+          ? Array.from(
+              new Set(
+                campaigns.flatMap((campaign) =>
+                  campaign.slug
+                    ? Object.keys(projectDailyStats[campaign.slug] ?? {})
+                    : [],
+                ),
+              ),
+            ).sort()
+          : getRecentChileDateKeys(Number(projectAnalyticsRange));
+
+      const periodLabel =
+        projectAnalyticsRange === "7"
+          ? "Últimos 7 días"
+          : projectAnalyticsRange === "30"
+            ? "Últimos 30 días"
+            : "Todo el período";
+
+      const campaignRows = await Promise.all(
+        campaigns.map(async (campaign) => {
+          const stats = campaign.slug
+            ? projectStats[campaign.slug]
+            : undefined;
+
+          const daily = campaign.slug
+            ? projectDailyStats[campaign.slug] ?? {}
+            : {};
+
+          const periodClicks = rangeDates.reduce(
+            (total, date) => total + (daily[date] ?? 0),
+            0,
+          );
+
+          let qrImage = "";
+
+          if (campaign.slug) {
+            try {
+              qrImage = await QRCode.toDataURL(
+                getShortLink(campaign.slug),
+                {
+                  width: 260,
+                  margin: 2,
+                  errorCorrectionLevel: "H",
+                },
+              );
+            } catch (error) {
+              console.error(
+                "No se pudo generar un QR para el reporte:",
+                error,
+              );
+            }
+          }
+
+          return {
+            campaign,
+            totalClicks: stats?.totalClicks ?? 0,
+            validClicks: stats?.validClicks ?? 0,
+            periodClicks,
+            qrImage,
+          };
+        }),
+      );
+
+      const totalClicks = campaignRows.reduce(
+        (total, item) => total + item.totalClicks,
+        0,
+      );
+
+      const totalValidClicks = campaignRows.reduce(
+        (total, item) => total + item.validClicks,
+        0,
+      );
+
+      const periodValidClicks = campaignRows.reduce(
+        (total, item) => total + item.periodClicks,
+        0,
+      );
+
+      const dailyTotals: Record<string, number> = {};
+
+      for (const date of rangeDates) {
+        dailyTotals[date] = campaignRows.reduce((total, item) => {
+          const daily = item.campaign.slug
+            ? projectDailyStats[item.campaign.slug] ?? {}
+            : {};
+
+          return total + (daily[date] ?? 0);
+        }, 0);
+      }
+
+      const maxPeriodClicks = Math.max(
+        0,
+        ...campaignRows.map((item) => item.periodClicks),
+      );
+
+      const leaders =
+        maxPeriodClicks > 0
+          ? campaignRows.filter(
+              (item) => item.periodClicks === maxPeriodClicks,
+            )
+          : [];
+
+      const escapeHtml = (value: string) =>
+        value
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#039;");
+
+      const campaignHtml = campaignRows
+        .sort((a, b) => b.periodClicks - a.periodClicks)
+        .map((item) => {
+          const share =
+            periodValidClicks > 0
+              ? Math.round(
+                  (item.periodClicks / periodValidClicks) * 100,
+                )
+              : 0;
+
+          return `
+            <tr>
+              <td>
+                <strong>${escapeHtml(item.campaign.project_name || "Campaña sin nombre")}</strong><br/>
+                <span class="muted">${escapeHtml(item.campaign.slug || "Sin código")}</span>
+              </td>
+              <td>${escapeHtml(typeLabel(item.campaign.type))}</td>
+              <td>${item.totalClicks}</td>
+              <td>${item.validClicks}</td>
+              <td>${item.periodClicks}</td>
+              <td>${share}%</td>
+              <td>
+                ${
+                  item.qrImage
+                    ? `<img src="${item.qrImage}" alt="QR" class="qr"/>`
+                    : "Sin QR"
+                }
+              </td>
+            </tr>
+          `;
+        })
+        .join("");
+
+      const dailyHtml =
+        rangeDates.length > 0
+          ? rangeDates
+              .map(
+                (date) => `
+                  <tr>
+                    <td>${escapeHtml(formatChartDate(date))}</td>
+                    <td>${dailyTotals[date] ?? 0}</td>
+                  </tr>
+                `,
+              )
+              .join("")
+          : `<tr><td colspan="2">Sin datos diarios para el período.</td></tr>`;
+
+      const leadersText =
+        leaders.length === 0
+          ? "Sin datos suficientes"
+          : leaders.length === 1
+            ? `${leaders[0].campaign.project_name || "Campaña sin nombre"} (${maxPeriodClicks} clics válidos)`
+            : `${leaders.length} campañas empatadas con ${maxPeriodClicks} clics válidos cada una: ${leaders
+                .map(
+                  (item) =>
+                    item.campaign.project_name || "Campaña sin nombre",
+                )
+                .join(", ")}`;
+
+      const reportDate = new Date().toLocaleString("es-CL");
+
+      const reportHtml = `
+        <!doctype html>
+        <html lang="es">
+          <head>
+            <meta charset="utf-8"/>
+            <title>Reporte JEc LINK - ${escapeHtml(project.name)}</title>
+            <style>
+              * { box-sizing: border-box; }
+              body {
+                margin: 0;
+                padding: 22px;
+                font-family: Arial, Helvetica, sans-serif;
+                color: #0f172a;
+                background: #fff;
+              }
+              h1, h2, h3, p { margin-top: 0; }
+              .header {
+                border-bottom: 3px solid #06b6d4;
+                padding-bottom: 12px;
+                margin-bottom: 16px;
+              }
+              .brand {
+                font-size: 12px;
+                font-weight: 800;
+                letter-spacing: 3px;
+                color: #0891b2;
+                text-transform: uppercase;
+              }
+              .title {
+                font-size: 27px;
+                margin: 6px 0 3px;
+              }
+              .muted { color: #64748b; font-size: 12px; }
+              .cards {
+                display: grid;
+                grid-template-columns: repeat(4, 1fr);
+                gap: 8px;
+                margin: 14px 0 18px;
+              }
+              .card {
+                border: 1px solid #cbd5e1;
+                border-radius: 10px;
+                padding: 10px;
+              }
+              .card .label {
+                font-size: 11px;
+                color: #64748b;
+                text-transform: uppercase;
+                font-weight: 700;
+              }
+              .card .value {
+                margin-top: 4px;
+                font-size: 22px;
+                font-weight: 800;
+              }
+              .section {
+                margin-top: 18px;
+              }
+              .highlight {
+                border: 1px solid #c4b5fd;
+                background: #f5f3ff;
+                border-radius: 10px;
+                padding: 10px 12px;
+                margin-top: 8px;
+                font-size: 12px;
+              }
+              table {
+                width: 100%;
+                border-collapse: collapse;
+                margin-top: 8px;
+                font-size: 11px;
+              }
+              th, td {
+                border: 1px solid #cbd5e1;
+                padding: 6px 7px;
+                text-align: left;
+                vertical-align: middle;
+              }
+              th {
+                background: #f1f5f9;
+                font-size: 10px;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+              }
+              .qr { width: 48px; height: 48px; object-fit: contain; }
+              .footer {
+                margin-top: 16px;
+                padding-top: 8px;
+                border-top: 1px solid #cbd5e1;
+                color: #64748b;
+                font-size: 9px;
+                text-align: center;
+              }
+              .no-print {
+                position: sticky;
+                top: 0;
+                display: flex;
+                justify-content: flex-end;
+                margin-bottom: 16px;
+              }
+              .print-button {
+                border: 0;
+                border-radius: 8px;
+                background: #06b6d4;
+                color: #083344;
+                font-weight: 800;
+                padding: 10px 16px;
+                cursor: pointer;
+              }
+              @media print {
+                body {
+                  padding: 0;
+                  font-size: 10px;
+                }
+                h2 {
+                  font-size: 18px;
+                  margin-bottom: 6px;
+                }
+                .no-print { display: none; }
+                .header { break-inside: avoid; }
+                .cards { break-inside: avoid; }
+                .highlight { break-inside: avoid; }
+                table { break-inside: auto; }
+                tr { break-inside: avoid; break-after: auto; }
+                thead { display: table-header-group; }
+                @page { size: A4 portrait; margin: 8mm; }
+              }
+            </style>
+          </head>
+          <body>
+            <div class="no-print" style="align-items:center; gap:12px;">
+              <span style="font-size:12px;color:#64748b;">
+                Para un PDF limpio, desactiva “Encabezados y pies de página” en la ventana de impresión.
+              </span>
+              <button class="print-button" onclick="window.print()">
+                Guardar / imprimir PDF
+              </button>
+            </div>
+
+            <div class="header">
+              <div class="brand">JEc LINK</div>
+              <h1 class="title">${escapeHtml(project.name)}</h1>
+              <p class="muted">
+                Reporte de analítica · ${escapeHtml(periodLabel)} · Generado ${escapeHtml(reportDate)}
+              </p>
+            </div>
+
+            <div class="cards">
+              <div class="card">
+                <div class="label">Campañas / QR</div>
+                <div class="value">${campaignRows.length}</div>
+              </div>
+              <div class="card">
+                <div class="label">Clics registrados</div>
+                <div class="value">${totalClicks}</div>
+              </div>
+              <div class="card">
+                <div class="label">Válidos históricos</div>
+                <div class="value">${totalValidClicks}</div>
+              </div>
+              <div class="card">
+                <div class="label">Válidos del período</div>
+                <div class="value">${periodValidClicks}</div>
+              </div>
+            </div>
+
+            <div class="section">
+              <h2>Campaña con mayor tráfico</h2>
+              <div class="highlight">${escapeHtml(leadersText)}</div>
+            </div>
+
+            <div class="section">
+              <h2>Comparación de campañas</h2>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Campaña</th>
+                    <th>Tipo</th>
+                    <th>Total</th>
+                    <th>Válidos</th>
+                    <th>Período</th>
+                    <th>Participación</th>
+                    <th>QR</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${campaignHtml}
+                </tbody>
+              </table>
+            </div>
+
+            <div class="section">
+              <h2>Evolución diaria</h2>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Fecha</th>
+                    <th>Clics válidos</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${dailyHtml}
+                </tbody>
+              </table>
+            </div>
+
+            <div class="footer">
+              JEc LINK · Conecta. Comparte. Simplifica.
+            </div>
+          </body>
+        </html>
+      `;
+
+      reportWindow.document.open();
+      reportWindow.document.write(reportHtml);
+      reportWindow.document.close();
+      reportWindow.focus();
+    } catch (error) {
+      console.error("Error generando reporte del proyecto:", error);
+
+      reportWindow.document.open();
+      reportWindow.document.write(
+        "<!doctype html><html><body style='font-family:Arial,sans-serif;padding:40px'><h2>No se pudo generar el reporte.</h2><p>Vuelve a JEc LINK e inténtalo nuevamente.</p></body></html>",
+      );
+      reportWindow.document.close();
+
+      alert("No se pudo generar el reporte del proyecto.");
+    } finally {
+      setExportingProjectId(null);
+    }
+  }
+
+  async function createProject() {
+    const cleanName = newProjectName.trim();
+
+    if (!cleanName) {
+      alert("Escribe un nombre para el proyecto.");
+      return;
+    }
+
+    setCreatingProject(true);
+
+    const { data, error } = await supabase
+      .from("projects")
+      .insert({
+        name: cleanName,
+        archived: false,
+      })
+      .select("id,name,description,created_at,archived")
+      .single();
+
+    if (error) {
+      console.error("Error creando proyecto:", error);
+
+      if (error.code === "23505") {
+        alert("Ya existe un proyecto activo con ese nombre.");
+      } else {
+        alert("No se pudo crear el proyecto.");
+      }
+
+      setCreatingProject(false);
+      return;
+    }
+
+    const created = data as ProjectRecord;
+
+    setProjects((current) => [created, ...current]);
+    setSelectedProjectDetailId(created.id);
+    setNewProjectName("");
+    setCreatingProject(false);
+  }
+
+  async function updateLinkProject(link: LinkRecord, projectId: string) {
+    setUpdatingProjectLinkId(link.id);
+
+    const value = projectId || null;
+
+    const { error } = await supabase
+      .from("links")
+      .update({ project_id: value })
+      .eq("id", link.id);
+
+    if (error) {
+      console.error("Error vinculando QR al proyecto:", error);
+      alert("No se pudo cambiar el proyecto de este QR.");
+      setUpdatingProjectLinkId(null);
+      return;
+    }
+
+    setHistoryLinks((current) =>
+      current.map((item) =>
+        item.id === link.id ? { ...item, project_id: value } : item,
+      ),
+    );
+
+    setUpdatingProjectLinkId(null);
+  }
+
+  function startCampaignForProject(project: ProjectRecord) {
+    setSelectedProjectId(project.id);
+    setProjectName("");
+    setResult("");
+    setQr("");
+    setMainView("create");
+    setShowAnalytics(false);
+    setShowAdminLogin(false);
   }
 
   function typeLabel(type: Mode) {
@@ -1075,6 +1916,7 @@ async function handleAdminLogout() {
   function clearAll() {
 
     setProjectName("");
+    setSelectedProjectId("");
 
     setPhone("");
 
@@ -1239,7 +2081,7 @@ async function handleAdminLogout() {
 
 
         <section className="mb-7 space-y-3">
-          <div className="grid grid-cols-3 gap-2 rounded-2xl border border-slate-800 bg-slate-900 p-2">
+          <div className="grid grid-cols-2 gap-2 rounded-2xl border border-slate-800 bg-slate-900 p-2 sm:grid-cols-4">
             <button
               onClick={() => {
                 setMainView("create");
@@ -1274,6 +2116,27 @@ async function handleAdminLogout() {
               }`}
             >
               Mis QR
+            </button>
+
+            <button
+              onClick={() => {
+                setMainView("projects");
+                setShowAnalytics(false);
+
+                if (isAuthenticated) {
+                  setShowAdminLogin(false);
+                } else {
+                  setShowAdminLogin(true);
+                  setLoginError("");
+                }
+              }}
+              className={`rounded-xl px-4 py-3 text-sm font-bold transition ${
+                mainView === "projects"
+                  ? "bg-cyan-400 text-slate-950"
+                  : "text-slate-400 hover:bg-slate-800"
+              }`}
+            >
+              Proyectos
             </button>
 
             <button
@@ -1321,7 +2184,7 @@ async function handleAdminLogout() {
           )}
         </section>
 
-        {(mainView === "analytics" || mainView === "history") &&
+        {(mainView === "analytics" || mainView === "history" || mainView === "projects") &&
           showAdminLogin &&
           !isAuthenticated && (
 
@@ -1337,7 +2200,7 @@ async function handleAdminLogout() {
 
         <h2 className="mt-3 text-2xl font-black text-white">
 
-          {mainView === "history" ? "Acceso a Mis QR" : "Acceso a Analítica"}
+          {mainView === "history" ? "Acceso a Mis QR" : mainView === "projects" ? "Acceso a Proyectos" : "Acceso a Analítica"}
 
         </h2>
 
@@ -1434,14 +2297,41 @@ async function handleAdminLogout() {
           <div className="rounded-3xl border border-slate-800 bg-slate-900 p-6 shadow-2xl">
 
             <div className="mb-6 rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-              <FieldLabel text="Nombre del proyecto" />
+              {isAuthenticated && (
+                <>
+                  <FieldLabel text="Proyecto (opcional)" />
+                  <select
+                    value={selectedProjectId}
+                    onChange={(event) => setSelectedProjectId(event.target.value)}
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none transition focus:border-cyan-400"
+                  >
+                    <option value="">Sin proyecto / QR independiente</option>
+                    {projects
+                      .filter((project) => !project.archived)
+                      .map((project) => (
+                        <option key={project.id} value={project.id}>
+                          {project.name}
+                        </option>
+                      ))}
+                  </select>
+
+                  {projects.filter((project) => !project.archived).length === 0 &&
+                    !projectsLoading && (
+                    <p className="mt-2 text-xs leading-5 text-amber-300">
+                      Aún no tienes proyectos. Puedes crear uno desde la pestaña Proyectos.
+                    </p>
+                  )}
+                </>
+              )}
+
+              <FieldLabel text="Nombre de campaña / QR" />
               <Input
                 value={projectName}
                 setValue={setProjectName}
-                placeholder="Ej: Facebook 4Life · Campaña octubre"
+                placeholder="Ej: Flyer A · Vitrina · Bolsas"
               />
               <p className="mt-2 text-xs leading-5 text-slate-500">
-                Este nombre te permitirá encontrar el QR y revisar su analítica después. JEc LINK bloqueará destinos duplicados.
+                Este nombre identifica la campaña. Un mismo proyecto puede tener varios QR con el mismo destino y cada uno conservará su propio código y analítica.
               </p>
             </div>
 
@@ -1481,7 +2371,7 @@ async function handleAdminLogout() {
 
 
 
-                <FieldLabel text="Mensaje predeterminado" />
+                <FieldLabel text="Mensaje que enviará el cliente" />
 
 
 
@@ -1985,6 +2875,801 @@ async function handleAdminLogout() {
 
 
 
+        {mainView === "projects" && isAuthenticated && (
+          <section className="rounded-2xl border border-slate-800 bg-slate-900 p-6">
+            <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.25em] text-cyan-400">
+                  JEc LINK
+                </p>
+                <h2 className="mt-2 text-3xl font-black text-white">Proyectos</h2>
+                <p className="mt-2 text-sm text-slate-400">
+                  Agrupa varias campañas y QR de un mismo negocio o cliente.
+                </p>
+              </div>
+
+              <button
+                onClick={handleAdminLogout}
+                className="rounded-xl border border-slate-700 px-4 py-3 text-sm font-semibold text-slate-400 transition hover:border-red-400 hover:text-red-400"
+              >
+                Cerrar sesión
+              </button>
+            </div>
+
+            <div className="mt-6 rounded-2xl border border-slate-800 bg-slate-950 p-5">
+              <p className="text-sm font-black text-white">Crear proyecto</p>
+              <p className="mt-1 text-xs text-slate-500">
+                Ejemplo: Librería Jade. Después podrás crear Flyer A, Flyer B, Vitrina o Bolsas dentro del mismo proyecto.
+              </p>
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto]">
+                <input
+                  value={newProjectName}
+                  onChange={(event) => setNewProjectName(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && !creatingProject) {
+                      void createProject();
+                    }
+                  }}
+                  maxLength={100}
+                  placeholder="Ej: Librería Jade"
+                  className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-white outline-none transition focus:border-cyan-400"
+                />
+
+                <button
+                  onClick={createProject}
+                  disabled={creatingProject}
+                  className="rounded-xl bg-cyan-400 px-5 py-3 text-sm font-black text-slate-950 transition hover:bg-cyan-300 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {creatingProject ? "Creando..." : "+ Crear proyecto"}
+                </button>
+              </div>
+            </div>
+
+            {projectsLoading && (
+              <div className="py-12 text-center text-slate-400">
+                Cargando proyectos...
+              </div>
+            )}
+
+            {projectsError && (
+              <div className="mt-6 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm font-semibold text-red-300">
+                {projectsError}
+              </div>
+            )}
+
+            {!projectsLoading &&
+              !projectsError &&
+              projects.filter((project) => !project.archived).length === 0 && (
+              <div className="mt-6 rounded-2xl border border-dashed border-slate-700 bg-slate-950/50 p-10 text-center">
+                <p className="font-bold text-slate-300">
+                  Todavía no hay proyectos.
+                </p>
+                <p className="mt-2 text-sm text-slate-500">
+                  Crea Librería Jade como primer proyecto.
+                </p>
+              </div>
+            )}
+
+            {!projectsLoading &&
+              !projectsError &&
+              projects.filter((project) => !project.archived).length > 0 && (
+              <div className="mt-6 space-y-4">
+                {projects
+                  .filter((project) => !project.archived)
+                  .map((project) => {
+                  const campaigns = historyLinks.filter(
+                    (link) => link.project_id === project.id,
+                  );
+
+                  const projectTotalClicks = campaigns.reduce(
+                    (total, link) =>
+                      total +
+                      (link.slug
+                        ? projectStats[link.slug]?.totalClicks ?? 0
+                        : 0),
+                    0,
+                  );
+
+                  const projectValidClicks = campaigns.reduce(
+                    (total, link) =>
+                      total +
+                      (link.slug
+                        ? projectStats[link.slug]?.validClicks ?? 0
+                        : 0),
+                    0,
+                  );
+
+                  const projectValidClicksToday = campaigns.reduce(
+                    (total, link) =>
+                      total +
+                      (link.slug
+                        ? projectStats[link.slug]?.validClicksToday ?? 0
+                        : 0),
+                    0,
+                  );
+
+                  const rankedCampaigns = [...campaigns].sort(
+                    (a, b) =>
+                      ((b.slug
+                        ? projectStats[b.slug]?.validClicks
+                        : 0) ?? 0) -
+                      ((a.slug
+                        ? projectStats[a.slug]?.validClicks
+                        : 0) ?? 0),
+                  );
+
+                  const maxValidClicks = rankedCampaigns.reduce(
+                    (max, link) => {
+                      const clicks = link.slug
+                        ? projectStats[link.slug]?.validClicks ?? 0
+                        : 0;
+
+                      return Math.max(max, clicks);
+                    },
+                    0,
+                  );
+
+                  const topCampaigns =
+                    maxValidClicks > 0
+                      ? rankedCampaigns.filter((link) => {
+                          const clicks = link.slug
+                            ? projectStats[link.slug]?.validClicks ?? 0
+                            : 0;
+
+                          return clicks === maxValidClicks;
+                        })
+                      : [];
+
+                  const dailyTotals: Record<string, number> = {};
+
+                  for (const campaign of campaigns) {
+                    if (!campaign.slug) {
+                      continue;
+                    }
+
+                    const campaignDaily =
+                      projectDailyStats[campaign.slug] ?? {};
+
+                    for (const [date, clicks] of Object.entries(
+                      campaignDaily,
+                    )) {
+                      dailyTotals[date] =
+                        (dailyTotals[date] ?? 0) + clicks;
+                    }
+                  }
+
+                  const chartDates =
+                    projectAnalyticsRange === "all"
+                      ? Object.keys(dailyTotals).sort()
+                      : getRecentChileDateKeys(
+                          Number(projectAnalyticsRange),
+                        );
+
+                  const projectDailySeries = chartDates.map((date) => ({
+                    date,
+                    clicks: dailyTotals[date] ?? 0,
+                  }));
+
+                  const maxDailyClicks = Math.max(
+                    1,
+                    ...projectDailySeries.map((item) => item.clicks),
+                  );
+
+                  const campaignPeriodStats = campaigns
+                    .map((link) => {
+                      const daily = link.slug
+                        ? projectDailyStats[link.slug] ?? {}
+                        : {};
+
+                      const periodClicks = chartDates.reduce(
+                        (total, date) => total + (daily[date] ?? 0),
+                        0,
+                      );
+
+                      return {
+                        link,
+                        periodClicks,
+                      };
+                    })
+                    .sort((a, b) => b.periodClicks - a.periodClicks);
+
+                  const maxCampaignPeriodClicks = Math.max(
+                    1,
+                    ...campaignPeriodStats.map(
+                      (item) => item.periodClicks,
+                    ),
+                  );
+
+                  const projectPeriodClicks = campaignPeriodStats.reduce(
+                    (total, item) => total + item.periodClicks,
+                    0,
+                  );
+
+                  const maxPeriodClicks = Math.max(
+                    0,
+                    ...campaignPeriodStats.map(
+                      (item) => item.periodClicks,
+                    ),
+                  );
+
+                  const periodLeaders =
+                    maxPeriodClicks > 0
+                      ? campaignPeriodStats.filter(
+                          (item) =>
+                            item.periodClicks === maxPeriodClicks,
+                        )
+                      : [];
+
+                  const periodLabel =
+                    projectAnalyticsRange === "7"
+                      ? "últimos 7 días"
+                      : projectAnalyticsRange === "30"
+                        ? "últimos 30 días"
+                        : "todo el período";
+
+                  const isOpen = selectedProjectDetailId === project.id;
+                  const isAnalyticsOpen =
+                    selectedProjectAnalyticsId === project.id;
+
+                  return (
+                    <article
+                      key={project.id}
+                      className="rounded-2xl border border-slate-800 bg-slate-950 p-5"
+                    >
+                      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                        <div>
+                          <h3 className="text-xl font-black text-white">
+                            {project.name}
+                          </h3>
+                          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-2 text-xs text-slate-500">
+                            <span>{campaigns.length} QR / campañas</span>
+                            <span>{projectValidClicks} clics válidos</span>
+                            <span>
+                              Creado:{" "}
+                              {new Date(project.created_at).toLocaleDateString(
+                                "es-CL",
+                              )}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            onClick={() =>
+                              setSelectedProjectDetailId(
+                                isOpen ? null : project.id,
+                              )
+                            }
+                            className="rounded-xl border border-cyan-400 px-4 py-2 text-sm font-bold text-cyan-400 transition hover:bg-cyan-400 hover:text-slate-950"
+                          >
+                            {isOpen ? "Ocultar campañas" : "Ver campañas"}
+                          </button>
+
+                          <button
+                            onClick={() =>
+                              setSelectedProjectAnalyticsId(
+                                isAnalyticsOpen ? null : project.id,
+                              )
+                            }
+                            className="rounded-xl border border-violet-400/70 px-4 py-2 text-sm font-bold text-violet-300 transition hover:bg-violet-400 hover:text-slate-950"
+                          >
+                            {isAnalyticsOpen
+                              ? "Ocultar analítica"
+                              : "Analítica del proyecto"}
+                          </button>
+
+                          <button
+                            onClick={() =>
+                              exportProjectReport(project, campaigns)
+                            }
+                            disabled={exportingProjectId === project.id}
+                            className="rounded-xl border border-emerald-400/70 px-4 py-2 text-sm font-bold text-emerald-300 transition hover:bg-emerald-400 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {exportingProjectId === project.id
+                              ? "Generando..."
+                              : "Exportar reporte"}
+                          </button>
+
+                          <button
+                            onClick={() => startEditingProject(project)}
+                            className="rounded-xl border border-amber-400/70 px-4 py-2 text-sm font-bold text-amber-300 transition hover:bg-amber-400 hover:text-slate-950"
+                          >
+                            Editar proyecto
+                          </button>
+
+                          <button
+                            onClick={() => archiveProject(project)}
+                            disabled={archivingProjectId === project.id}
+                            className="rounded-xl border border-red-500/60 px-4 py-2 text-sm font-bold text-red-400 transition hover:bg-red-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {archivingProjectId === project.id
+                              ? "Archivando..."
+                              : "Archivar"}
+                          </button>
+
+                          <button
+                            onClick={() => startCampaignForProject(project)}
+                            className="rounded-xl bg-cyan-400 px-4 py-2 text-sm font-black text-slate-950 transition hover:bg-cyan-300"
+                          >
+                            + Nueva campaña
+                          </button>
+                        </div>
+                      </div>
+
+                      {editingProjectId === project.id && (
+                        <div className="mt-5 rounded-xl border border-amber-400/30 bg-amber-400/5 p-4">
+                          <label className="text-xs font-bold uppercase tracking-wider text-amber-300">
+                            Nombre del proyecto
+                          </label>
+
+                          <input
+                            value={editingProjectTitle}
+                            onChange={(event) =>
+                              setEditingProjectTitle(event.target.value)
+                            }
+                            onKeyDown={(event) => {
+                              if (
+                                event.key === "Enter" &&
+                                savingProjectEditId !== project.id
+                              ) {
+                                void saveProjectTitle(project);
+                              }
+                            }}
+                            maxLength={100}
+                            autoFocus
+                            className="mt-3 w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-white outline-none transition focus:border-amber-400"
+                          />
+
+                          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                            <button
+                              onClick={() => saveProjectTitle(project)}
+                              disabled={savingProjectEditId === project.id}
+                              className="rounded-xl bg-amber-400 px-4 py-2 text-sm font-black text-slate-950 transition hover:bg-amber-300 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {savingProjectEditId === project.id
+                                ? "Guardando..."
+                                : "Guardar nombre"}
+                            </button>
+
+                            <button
+                              onClick={cancelEditingProject}
+                              disabled={savingProjectEditId === project.id}
+                              className="rounded-xl border border-slate-700 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              Cancelar
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {isAnalyticsOpen && (
+                        <div className="mt-5 border-t border-slate-800 pt-5">
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                            <div>
+                              <p className="text-xs font-bold uppercase tracking-[0.22em] text-violet-300">
+                                Analítica consolidada
+                              </p>
+                              <h4 className="mt-1 text-xl font-black text-white">
+                                {project.name}
+                              </h4>
+                            </div>
+
+                            <p className="text-xs text-slate-500">
+                              Suma de todas las campañas vinculadas al proyecto.
+                            </p>
+                          </div>
+
+                          <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                            <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
+                              <p className="text-xs font-semibold text-slate-500">
+                                Campañas / QR
+                              </p>
+                              <p className="mt-1 text-3xl font-black text-cyan-400">
+                                {campaigns.length}
+                              </p>
+                            </div>
+
+                            <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
+                              <p className="text-xs font-semibold text-slate-500">
+                                Clics registrados
+                              </p>
+                              <p className="mt-1 text-3xl font-black text-cyan-400">
+                                {projectTotalClicks}
+                              </p>
+                            </div>
+
+                            <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
+                              <p className="text-xs font-semibold text-slate-500">
+                                Clics válidos
+                              </p>
+                              <p className="mt-1 text-3xl font-black text-cyan-400">
+                                {projectValidClicks}
+                              </p>
+                            </div>
+
+                            <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
+                              <p className="text-xs font-semibold text-slate-500">
+                                Clics válidos hoy
+                              </p>
+                              <p className="mt-1 text-3xl font-black text-cyan-400">
+                                {projectValidClicksToday}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="mt-4 rounded-xl border border-violet-400/20 bg-violet-400/5 p-4">
+                            <p className="text-xs font-bold uppercase tracking-wider text-violet-300">
+                              Campaña con más clics válidos
+                            </p>
+                            <p className="mt-2 text-lg font-black text-white">
+                              {topCampaigns.length === 1
+                                ? topCampaigns[0].project_name ||
+                                  "Campaña sin nombre"
+                                : topCampaigns.length > 1
+                                  ? `${topCampaigns.length} campañas empatadas`
+                                  : "Aún sin datos suficientes"}
+                            </p>
+                            <p className="mt-1 text-sm text-slate-400">
+                              {topCampaigns.length === 1
+                                ? `${maxValidClicks} clics válidos`
+                                : topCampaigns.length > 1
+                                  ? `${topCampaigns
+                                      .map(
+                                        (link) =>
+                                          link.project_name ||
+                                          "Campaña sin nombre",
+                                      )
+                                      .join(" · ")} · ${maxValidClicks} clics válidos cada una`
+                                  : "Cuando haya clics válidos, JEc LINK mostrará aquí la campaña principal."}
+                            </p>
+                          </div>
+
+                          <div className="mt-5 rounded-xl border border-slate-800 bg-slate-900 p-4">
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                              <div>
+                                <p className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                                  Evolución diaria
+                                </p>
+                                <p className="mt-1 text-sm text-slate-400">
+                                  Clics válidos de todas las campañas del proyecto.
+                                </p>
+                              </div>
+
+                              <div className="flex gap-2">
+                                {([
+                                  ["7", "7 días"],
+                                  ["30", "30 días"],
+                                  ["all", "Todo"],
+                                ] as const).map(([value, label]) => (
+                                  <button
+                                    key={value}
+                                    onClick={() =>
+                                      setProjectAnalyticsRange(value)
+                                    }
+                                    className={`rounded-lg px-3 py-2 text-xs font-bold transition ${
+                                      projectAnalyticsRange === value
+                                        ? "bg-cyan-400 text-slate-950"
+                                        : "border border-slate-700 text-slate-400 hover:bg-slate-800"
+                                    }`}
+                                  >
+                                    {label}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+
+                            {projectDailySeries.length === 0 ? (
+                              <div className="mt-5 rounded-xl border border-dashed border-slate-700 p-8 text-center text-sm text-slate-500">
+                                Aún no hay datos diarios para mostrar.
+                              </div>
+                            ) : (
+                              <div className="mt-5 overflow-x-auto pb-2">
+                                <div
+                                  className="flex h-52 min-w-max items-end gap-3 border-b border-slate-700 px-2"
+                                  aria-label="Gráfica de clics válidos por día"
+                                >
+                                  {projectDailySeries.map((item) => {
+                                    const height =
+                                      item.clicks === 0
+                                        ? 4
+                                        : Math.max(
+                                            12,
+                                            Math.round(
+                                              (item.clicks /
+                                                maxDailyClicks) *
+                                                150,
+                                            ),
+                                          );
+
+                                    return (
+                                      <div
+                                        key={item.date}
+                                        className="flex w-12 shrink-0 flex-col items-center justify-end"
+                                      >
+                                        <span className="mb-2 text-xs font-black text-cyan-300">
+                                          {item.clicks}
+                                        </span>
+
+                                        <div
+                                          className="w-7 rounded-t-md bg-cyan-400 transition-all"
+                                          style={{ height: `${height}px` }}
+                                          title={`${formatChartDate(item.date)}: ${item.clicks} clics válidos`}
+                                        />
+
+                                        <span className="mt-2 whitespace-nowrap text-[10px] text-slate-500">
+                                          {formatChartDate(item.date)}
+                                        </span>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+
+                          {campaigns.length > 0 && (
+                            <div className="mt-5 rounded-xl border border-slate-800 bg-slate-900 p-4">
+                              <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                                <div>
+                                  <p className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                                    Comparación por campaña
+                                  </p>
+                                  <p className="mt-1 text-sm text-slate-400">
+                                    Rendimiento durante {periodLabel}.
+                                  </p>
+                                </div>
+
+                                <div className="text-left sm:text-right">
+                                  <p className="text-2xl font-black text-cyan-400">
+                                    {projectPeriodClicks}
+                                  </p>
+                                  <p className="text-xs text-slate-500">
+                                    clics válidos del proyecto
+                                  </p>
+                                </div>
+                              </div>
+
+                              <div className="mt-5 space-y-4">
+                                {campaignPeriodStats.map(
+                                  ({ link, periodClicks }, index) => {
+                                    const width =
+                                      periodClicks === 0
+                                        ? 0
+                                        : Math.max(
+                                            6,
+                                            Math.round(
+                                              (periodClicks /
+                                                maxCampaignPeriodClicks) *
+                                                100,
+                                            ),
+                                          );
+
+                                    const share =
+                                      projectPeriodClicks > 0
+                                        ? Math.round(
+                                            (periodClicks /
+                                              projectPeriodClicks) *
+                                              100,
+                                          )
+                                        : 0;
+
+                                    return (
+                                      <div
+                                        key={link.id}
+                                        className="rounded-xl border border-slate-800 bg-slate-950 p-4"
+                                      >
+                                        <div className="flex items-start justify-between gap-4">
+                                          <div className="min-w-0">
+                                            <div className="flex flex-wrap items-center gap-2">
+                                              <p className="truncate font-black text-white">
+                                                {link.project_name ||
+                                                  "Campaña sin nombre"}
+                                              </p>
+
+                                              {periodClicks > 0 &&
+                                                periodClicks ===
+                                                  maxPeriodClicks && (
+                                                  <span className="rounded-full bg-cyan-400/10 px-2 py-1 text-[10px] font-black uppercase tracking-wider text-cyan-300">
+                                                    {periodLeaders.length > 1
+                                                      ? "Empate mayor tráfico"
+                                                      : "Mayor tráfico"}
+                                                  </span>
+                                                )}
+                                            </div>
+
+                                            <p className="mt-1 text-xs text-slate-500">
+                                              Código:{" "}
+                                              {link.slug || "Sin código"}
+                                            </p>
+                                          </div>
+
+                                          <div className="shrink-0 text-right">
+                                            <p className="text-2xl font-black text-cyan-400">
+                                              {periodClicks}
+                                            </p>
+                                            <p className="text-xs text-slate-500">
+                                              {share}% del proyecto
+                                            </p>
+                                          </div>
+                                        </div>
+
+                                        <div className="mt-4 h-3 overflow-hidden rounded-full bg-slate-800">
+                                          <div
+                                            className="h-full rounded-full bg-cyan-400 transition-all"
+                                            style={{
+                                              width: `${width}%`,
+                                            }}
+                                          />
+                                        </div>
+                                      </div>
+                                    );
+                                  },
+                                )}
+                              </div>
+                            </div>
+                          )}
+
+                          {campaigns.length > 0 && (
+                            <div className="mt-5 overflow-hidden rounded-xl border border-slate-800">
+                              <div className="grid grid-cols-[1fr_auto_auto] gap-3 bg-slate-900 px-4 py-3 text-xs font-bold uppercase tracking-wider text-slate-500">
+                                <span>Campaña</span>
+                                <span>Total</span>
+                                <span>Válidos</span>
+                              </div>
+
+                              {rankedCampaigns.map((link) => {
+                                const stats = link.slug
+                                  ? projectStats[link.slug]
+                                  : undefined;
+
+                                return (
+                                  <div
+                                    key={link.id}
+                                    className="grid grid-cols-[1fr_auto_auto] gap-3 border-t border-slate-800 px-4 py-3 text-sm"
+                                  >
+                                    <div className="min-w-0">
+                                      <p className="truncate font-bold text-slate-200">
+                                        {link.project_name || "Campaña sin nombre"}
+                                      </p>
+                                      <p className="mt-1 text-xs text-slate-500">
+                                        {link.slug || "Sin código"}
+                                      </p>
+                                    </div>
+
+                                    <span className="font-bold text-slate-300">
+                                      {stats?.totalClicks ?? 0}
+                                    </span>
+
+                                    <span className="font-black text-cyan-400">
+                                      {stats?.validClicks ?? 0}
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {isOpen && (
+                        <div className="mt-5 border-t border-slate-800 pt-5">
+                          {campaigns.length === 0 ? (
+                            <div className="rounded-xl border border-dashed border-slate-700 p-6 text-center">
+                              <p className="font-semibold text-slate-300">
+                                Este proyecto todavía no tiene campañas vinculadas.
+                              </p>
+                              <p className="mt-2 text-xs text-slate-500">
+                                Puedes crear una nueva o vincular un QR existente desde Mis QR.
+                              </p>
+                            </div>
+                          ) : (
+                            <div className="grid gap-3 lg:grid-cols-2">
+                              {campaigns.map((link) => (
+                                <div
+                                  key={link.id}
+                                  className="rounded-xl border border-slate-800 bg-slate-900 p-4"
+                                >
+                                  <div className="flex items-start justify-between gap-3">
+                                    <div className="min-w-0">
+                                      <span className="inline-flex rounded-full bg-cyan-400/10 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-cyan-400">
+                                        {typeLabel(link.type)}
+                                      </span>
+                                      <p className="mt-2 truncate font-black text-white">
+                                        {link.project_name || "Campaña sin nombre"}
+                                      </p>
+                                      <p className="mt-1 text-xs text-slate-500">
+                                        Código: {link.slug || "Sin código"}
+                                      </p>
+                                    </div>
+
+                                    <div className="shrink-0 text-right">
+                                      <p className="text-2xl font-black text-cyan-400">
+                                        {link.slug
+                                          ? projectStats[link.slug]?.validClicks ?? 0
+                                          : 0}
+                                      </p>
+                                      <p className="text-[10px] text-slate-500">
+                                        clics válidos
+                                      </p>
+                                    </div>
+                                  </div>
+
+                                  {link.slug && (
+                                    <button
+                                      onClick={() => {
+                                        setSelectedAnalyticsSlug(link.slug);
+                                        setMainView("analytics");
+                                        setShowAnalytics(true);
+                                      }}
+                                      className="mt-4 w-full rounded-xl border border-violet-400/70 px-3 py-2 text-sm font-bold text-violet-300 transition hover:bg-violet-400 hover:text-slate-950"
+                                    >
+                                      Ver analítica
+                                    </button>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+
+            {projects.some((project) => project.archived) && (
+              <div className="mt-8 border-t border-slate-800 pt-6">
+                <h3 className="text-xl font-black text-white">
+                  Proyectos archivados
+                </h3>
+                <p className="mt-2 text-sm text-slate-500">
+                  Sus QR siguen activos. Puedes restaurar el proyecto cuando quieras.
+                </p>
+
+                <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                  {projects
+                    .filter((project) => project.archived)
+                    .map((project) => {
+                      const linkedQrCount = historyLinks.filter(
+                        (link) => link.project_id === project.id,
+                      ).length;
+
+                      return (
+                        <div
+                          key={project.id}
+                          className="rounded-xl border border-slate-800 bg-slate-950 p-4"
+                        >
+                          <div className="flex items-center justify-between gap-4">
+                            <div>
+                              <p className="font-black text-slate-300">
+                                {project.name}
+                              </p>
+                              <p className="mt-1 text-xs text-slate-500">
+                                {linkedQrCount} QR / campañas vinculadas
+                              </p>
+                            </div>
+
+                            <button
+                              onClick={() => restoreProject(project)}
+                              disabled={restoringProjectId === project.id}
+                              className="rounded-xl border border-emerald-400/70 px-4 py-2 text-sm font-bold text-emerald-300 transition hover:bg-emerald-400 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {restoringProjectId === project.id
+                                ? "Restaurando..."
+                                : "Restaurar"}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+            )}
+          </section>
+        )}
+
         {mainView === "history" && isAuthenticated && (
           <section className="rounded-2xl border border-slate-800 bg-slate-900 p-6">
             <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
@@ -2097,6 +3782,34 @@ async function handleAdminLogout() {
                         <span>Código: {link.slug || "Sin código"}</span>
                       </div>
 
+                      <div className="mt-4">
+                        <label className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                          Proyecto
+                        </label>
+                        <select
+                          value={link.project_id || ""}
+                          onChange={(event) =>
+                            void updateLinkProject(link, event.target.value)
+                          }
+                          disabled={updatingProjectLinkId === link.id}
+                          className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-300 outline-none transition focus:border-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <option value="">Sin proyecto</option>
+                          {projects
+                            .filter(
+                              (project) =>
+                                !project.archived ||
+                                project.id === link.project_id,
+                            )
+                            .map((project) => (
+                              <option key={project.id} value={project.id}>
+                                {project.name}
+                                {project.archived ? " (archivado)" : ""}
+                              </option>
+                            ))}
+                        </select>
+                      </div>
+
                       {editingId === link.id && (
                         <div className="mt-5 rounded-xl border border-cyan-400/30 bg-cyan-400/5 p-4">
                           <label className="text-xs font-bold uppercase tracking-wider text-cyan-400">
@@ -2136,6 +3849,102 @@ async function handleAdminLogout() {
                         </div>
                       )}
 
+                      {link.type === "whatsapp" &&
+                        editingMessageId === link.id && (
+                          <div className="mt-5 rounded-xl border border-emerald-400/30 bg-emerald-400/5 p-4">
+                            <label className="text-xs font-bold uppercase tracking-wider text-emerald-400">
+                              Mensaje de WhatsApp
+                            </label>
+
+                            <textarea
+                              value={editingMessage}
+                              onChange={(event) =>
+                                setEditingMessage(event.target.value)
+                              }
+                              rows={5}
+                              placeholder="Ej: Hola 👋 Vi el QR de Librería Jade y quisiera hacer una consulta."
+                              className="mt-3 w-full resize-none rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none transition focus:border-emerald-400"
+                            />
+
+                            <div className="mt-3 rounded-xl border border-slate-800 bg-slate-950 p-3">
+                              <p className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                                El cliente enviará
+                              </p>
+
+                              <p className="mt-2 whitespace-pre-wrap text-sm text-slate-300">
+                                {editingMessage || "Sin mensaje predeterminado"}
+                              </p>
+                            </div>
+
+                            <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                              <button
+                                onClick={() => previewWhatsAppMessage(link)}
+                                disabled={savingMessage}
+                                className="rounded-xl border border-emerald-400/70 px-3 py-2 text-sm font-bold text-emerald-300 transition hover:bg-emerald-400 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                Previsualizar
+                              </button>
+
+                              <button
+                                onClick={() => saveWhatsAppMessage(link)}
+                                disabled={savingMessage}
+                                className="rounded-xl bg-emerald-500 px-3 py-2 text-sm font-black text-white transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                {savingMessage
+                                  ? "Guardando..."
+                                  : "Guardar mensaje"}
+                              </button>
+
+                              <button
+                                onClick={cancelEditingMessage}
+                                disabled={savingMessage}
+                                className="rounded-xl border border-slate-700 px-3 py-2 text-sm font-semibold text-slate-300 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                Cancelar
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                      {previewQrId === link.id && previewQrImage && (
+                        <div className="mt-5 rounded-2xl border border-cyan-400/30 bg-slate-900 p-4">
+                          <div className="flex items-center justify-between gap-3">
+                            <div>
+                              <p className="text-sm font-black text-white">
+                                Previsualización del QR
+                              </p>
+                              <p className="mt-1 text-xs text-slate-500">
+                                Código: {link.slug || "Sin código"}
+                              </p>
+                            </div>
+
+                            <button
+                              onClick={() => {
+                                setPreviewQrId(null);
+                                setPreviewQrImage("");
+                              }}
+                              className="rounded-lg border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-400 transition hover:bg-slate-800"
+                            >
+                              Cerrar
+                            </button>
+                          </div>
+
+                          <div className="mt-4 flex justify-center">
+                            <div className="rounded-2xl bg-white p-4">
+                              <img
+                                src={previewQrImage}
+                                alt={`QR de ${link.project_name || "JEc LINK"}`}
+                                className="h-56 w-56"
+                              />
+                            </div>
+                          </div>
+
+                          <p className="mt-3 break-all text-center text-xs text-slate-500">
+                            {link.slug ? getShortLink(link.slug) : ""}
+                          </p>
+                        </div>
+                      )}
+
                       <div className="mt-5 grid gap-2 sm:grid-cols-2">
                         <button
                           onClick={() => copyHistoryLink(link.slug)}
@@ -2152,11 +3961,28 @@ async function handleAdminLogout() {
                         </button>
 
                         <button
+                          onClick={() => previewHistoryQR(link)}
+                          disabled={!link.slug}
+                          className="rounded-xl border border-cyan-400/70 px-3 py-2 text-sm font-bold text-cyan-300 transition hover:bg-cyan-400 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          {previewQrId === link.id ? "Ocultar QR" : "Previsualizar QR"}
+                        </button>
+
+                        <button
                           onClick={() => startEditingProjectName(link)}
                           className="rounded-xl border border-amber-400/70 px-3 py-2 text-sm font-bold text-amber-300 transition hover:bg-amber-400 hover:text-slate-950"
                         >
                           Editar nombre
                         </button>
+
+                        {link.type === "whatsapp" && (
+                          <button
+                            onClick={() => startEditingMessage(link)}
+                            className="rounded-xl border border-emerald-400/70 px-3 py-2 text-sm font-bold text-emerald-300 transition hover:bg-emerald-400 hover:text-slate-950"
+                          >
+                            Editar mensaje
+                          </button>
+                        )}
 
                         <button
                           onClick={() => {
@@ -2502,7 +4328,7 @@ async function handleAdminLogout() {
 
           <p className="mt-2 text-sm text-slate-400">
 
-            Contacto / vCard · Exportar reportes · Gestión avanzada de proyectos
+            Contacto / vCard · Exportar reportes · Integración con Gestor Comercial
 
           </p>
 
