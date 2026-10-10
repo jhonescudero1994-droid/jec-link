@@ -122,19 +122,58 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const adminEmail = process.env.ADMIN_EMAIL;
+    const { data: profile, error: profileError } = await supabaseAdmin
+      .from("profiles")
+      .select("platform_role,status")
+      .eq("id", user.id)
+      .maybeSingle();
 
-    if (
-      !adminEmail ||
-      user.email?.toLowerCase() !== adminEmail.toLowerCase()
-    ) {
+    if (profileError) {
+      console.error("Error obteniendo perfil:", profileError);
+
       return Response.json(
-        { error: "Acceso restringido al administrador." },
+        { error: "No se pudo validar el perfil del usuario." },
+        { status: 500 },
+      );
+    }
+
+    if (!profile || profile.status !== "active") {
+      return Response.json(
+        { error: "La cuenta no está activa." },
         { status: 403 },
       );
     }
 
-    const selectedSlug = request.nextUrl.searchParams.get("slug")?.trim() || null;
+    const isAdmin = profile.platform_role === "admin";
+
+    let memberProjectIds: string[] = [];
+
+    if (!isAdmin) {
+      const { data: memberships, error: membershipsError } =
+        await supabaseAdmin
+          .from("project_members")
+          .select("project_id")
+          .eq("user_id", user.id);
+
+      if (membershipsError) {
+        console.error(
+          "Error obteniendo proyectos autorizados:",
+          membershipsError,
+        );
+
+        return Response.json(
+          { error: "No se pudieron validar los proyectos autorizados." },
+          { status: 500 },
+        );
+      }
+
+      memberProjectIds = (memberships ?? []).map(
+        (membership) => membership.project_id,
+      );
+    }
+
+    const selectedSlug =
+      request.nextUrl.searchParams.get("slug")?.trim() || null;
 
     let project: {
       project_name: string | null;
@@ -148,7 +187,9 @@ export async function GET(request: NextRequest) {
     if (selectedSlug) {
       const { data: projectData, error: projectError } = await supabaseAdmin
         .from("links")
-        .select("project_name,type,generated_url,slug,created_at,clicks")
+        .select(
+          "project_name,type,generated_url,slug,created_at,clicks,project_id,created_by",
+        )
         .eq("slug", selectedSlug)
         .eq("archived", false)
         .maybeSingle();
@@ -169,7 +210,27 @@ export async function GET(request: NextRequest) {
         );
       }
 
-      project = projectData;
+      const canViewSelectedLink =
+        isAdmin ||
+        projectData.created_by === user.id ||
+        (projectData.project_id !== null &&
+          memberProjectIds.includes(projectData.project_id));
+
+      if (!canViewSelectedLink) {
+        return Response.json(
+          { error: "No tienes acceso a esta analítica." },
+          { status: 403 },
+        );
+      }
+
+      project = {
+        project_name: projectData.project_name,
+        type: projectData.type,
+        generated_url: projectData.generated_url,
+        slug: projectData.slug,
+        created_at: projectData.created_at,
+        clicks: projectData.clicks,
+      };
     }
 
     let activeSlugs: string[] = [];
@@ -177,13 +238,33 @@ export async function GET(request: NextRequest) {
     if (selectedSlug) {
       activeSlugs = [selectedSlug];
     } else {
-      const { data: activeLinks, error: activeLinksError } = await supabaseAdmin
+      let activeLinksQuery = supabaseAdmin
         .from("links")
         .select("slug")
         .eq("archived", false);
 
+      if (!isAdmin) {
+        const accessFilters = [`created_by.eq.${user.id}`];
+
+        if (memberProjectIds.length > 0) {
+          accessFilters.push(
+            `project_id.in.(${memberProjectIds.join(",")})`,
+          );
+        }
+
+        activeLinksQuery = activeLinksQuery.or(
+          accessFilters.join(","),
+        );
+      }
+
+      const { data: activeLinks, error: activeLinksError } =
+        await activeLinksQuery;
+
       if (activeLinksError) {
-        console.error("Error obteniendo enlaces activos:", activeLinksError);
+        console.error(
+          "Error obteniendo enlaces activos:",
+          activeLinksError,
+        );
 
         return Response.json(
           { error: "No se pudieron obtener los enlaces." },

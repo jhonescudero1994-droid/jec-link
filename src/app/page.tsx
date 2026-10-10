@@ -115,6 +115,7 @@ const [adminPassword, setAdminPassword] = useState("");
 const [isAuthenticated, setIsAuthenticated] = useState(false);
 
 const [loginError, setLoginError] = useState("");
+const [loginNotice, setLoginNotice] = useState("");
 
 const [showAdminLogin, setShowAdminLogin] = useState(false);
 
@@ -1838,6 +1839,7 @@ async function generateWhatsApp() {
   async function handleAdminLogin() {
 
   setLoginError("");
+  setLoginNotice("");
 
 
 
@@ -1873,6 +1875,33 @@ async function generateWhatsApp() {
 
 }
 
+async function handlePasswordRecovery() {
+  setLoginError("");
+  setLoginNotice("");
+
+  const email = adminEmail.trim();
+
+  if (!email) {
+    setLoginError("Escribe primero tu correo electrónico.");
+    return;
+  }
+
+  const redirectTo = "https://jec-link.vercel.app/auth/set-password";
+
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo,
+  });
+
+  if (error) {
+    console.error("Error enviando recuperación:", error);
+    setLoginError("No se pudo enviar el correo para crear o recuperar la contraseña.");
+    return;
+  }
+
+  setLoginNotice(
+    "Te enviamos un correo. Abre el enlace para crear o cambiar tu contraseña.",
+  );
+}
 
 
 async function handleAdminLogout() {
@@ -2260,6 +2289,16 @@ async function handleAdminLogout() {
 
         )}
 
+        {loginNotice && (
+
+          <p className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm font-semibold text-emerald-300">
+
+            {loginNotice}
+
+          </p>
+
+        )}
+
 
 
         <button
@@ -2272,6 +2311,14 @@ async function handleAdminLogout() {
 
           Iniciar sesión
 
+        </button>
+
+        <button
+          type="button"
+          onClick={handlePasswordRecovery}
+          className="w-full rounded-xl border border-slate-700 px-4 py-3 text-sm font-bold text-slate-300 transition hover:border-cyan-400 hover:text-cyan-300"
+        >
+          Crear / recuperar contraseña
         </button>
 
       </div>
